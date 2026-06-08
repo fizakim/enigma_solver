@@ -9,11 +9,12 @@ from visualiser import visualise
 net = EnigmaNet(config3, load_target=False)
 target_sim = config3.build()
 
+plaintext = config3.language.generate_sentence(3) if config3.language else "ABC"
 
-plaintext = "ABC"
 print(f"Random net:  '{plaintext}' -> '{net.encrypt_string(plaintext)}'")
 print(f"Target sim:  '{plaintext}' -> '{target_sim.encrypt(plaintext)}'")
 
 visualise(net, target_sim, show_active=True)
+
 
 

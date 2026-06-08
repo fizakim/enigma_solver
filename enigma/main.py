@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config.config3 import config3
 
 positions = [0, 0, 0]
-plaintext = "ABC"
+plaintext = config3.language.generate_sentence(3) if config3.language else "ABC"
 print("Plaintext:  ", plaintext)
 
 machine_enc = config3.build(positions)
