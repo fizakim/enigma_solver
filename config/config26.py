@@ -11,8 +11,3 @@ config26 = EnigmaConfig(
     plugboard_pairs=[]
 )
 
-def build(positions=None):
-    return config26.build(positions)
-
-def make_enigma(positions=None):
-    return config26.build(positions)

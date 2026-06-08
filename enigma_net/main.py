@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from enigma.config.config3 import config3
+from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
 
 net = EnigmaNet(config3, load_target=False)

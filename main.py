@@ -1,15 +1,15 @@
-from enigma.config.config3 import build
+from config.config3 import config3
 
 positions = [0, 0, 0]
 plaintext = "ABC"
 print("Plaintext:  ", plaintext)
 
-machine_enc = build(positions)
+machine_enc = config3.build(positions)
 
 ciphertext = machine_enc.encrypt(plaintext)
 print("Ciphertext:", ciphertext)
 
-machine_dec = build(positions)
+machine_dec = config3.build(positions)
 decrypted = machine_dec.decrypt(ciphertext)
 print("Decrypted: ", decrypted)
 

@@ -5,30 +5,22 @@ from .rotor_layer import RotorLayer
 class EnigmaNet(nn.Module):
     def __init__(self, config, load_target=False):
         super().__init__()
+        self.config = config
         self.n = len(config.alphabet)
         self.alphabet = config.alphabet
         self.char_to_idx = {c: i for i, c in enumerate(self.alphabet)}
 
         self.rotors = nn.ModuleList([
-            RotorLayer(self.n, self._wiring_to_matrix(r.wiring) if load_target else None)
+            RotorLayer(self.n, torch.from_numpy(config.wiring_to_matrix(r.wiring)).float() if load_target else None)
             for r in config.rotors
         ])
-        self.register_buffer("reflector", self._wiring_to_matrix(config.reflector))
-        self.notches = [
-            r.notch if isinstance(r.notch, int) else config.alphabet.index(r.notch)
-            for r in config.rotors
-        ]
+        self.register_buffer("reflector", torch.from_numpy(config.wiring_to_matrix(config.reflector)).float())
+        self.notches = [config.parse_position(r.notch) for r in config.rotors]
         self.reset()
 
         if load_target:
             for p in self.parameters():
                 p.requires_grad = False
-
-    def _wiring_to_matrix(self, wiring):
-        matrix = torch.zeros(self.n, self.n)
-        for col, char in enumerate(wiring):
-            matrix[self.char_to_idx[char], col] = 1.0
-        return matrix
 
     def step(self):
         for i in range(len(self.rotors) - 1, -1, -1):
@@ -49,10 +41,7 @@ class EnigmaNet(nn.Module):
     def reset(self, positions=None):
         if positions is None:
             positions = [0] * len(self.rotors)
-        self.positions = [
-            self.alphabet.index(p) if isinstance(p, str) else int(p)
-            for p in positions
-        ]
+        self.positions = [self.config.parse_position(p) for p in positions]
 
     def encrypt_string(self, text):
         res = []
