@@ -36,7 +36,7 @@ class EnigmaNet(nn.Module):
         v = self.reflector @ v
         for r, pos in zip(self.rotors, self.positions):
             v = r.backward_pass(v, pos)
-        return torch.softmax(v, dim=-1)
+        return v
 
     def reset(self, positions=None):
         if positions is None:
@@ -51,7 +51,7 @@ class EnigmaNet(nn.Module):
                 continue
             v = torch.zeros(self.n)
             v[self.char_to_idx[c]] = 1.0
-            out = self.forward(v)
+            out = torch.softmax(self.forward(v), dim=-1)
             res.append(self.alphabet[torch.argmax(out).item()])
         return "".join(res)
 
