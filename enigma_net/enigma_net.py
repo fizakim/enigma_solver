@@ -3,12 +3,13 @@ import torch.nn as nn
 from .rotor_layer import RotorLayer
 
 class EnigmaNet(nn.Module):
-    def __init__(self, config, load_target=False):
+    def __init__(self, config, load_target=False, sinkhorn=None):
         super().__init__()
         self.config = config
         self.n = len(config.alphabet)
         self.alphabet = config.alphabet
         self.char_to_idx = {c: i for i, c in enumerate(self.alphabet)}
+        self.sinkhorn = sinkhorn
 
         self.rotors = nn.ModuleList([
             RotorLayer(self.n, torch.from_numpy(config.wiring_to_matrix(r.wiring)).float() if load_target else None)
@@ -32,10 +33,12 @@ class EnigmaNet(nn.Module):
     def forward(self, v):
         self.step()
         for r, pos in zip(reversed(self.rotors), reversed(self.positions)):
-            v = r(v, pos)
+            w = self.sinkhorn(r.wiring) if self.sinkhorn is not None else r.wiring
+            v = r(v, pos, wiring=w)
         v = self.reflector @ v
         for r, pos in zip(self.rotors, self.positions):
-            v = r.backward_pass(v, pos)
+            w = self.sinkhorn(r.wiring) if self.sinkhorn is not None else r.wiring
+            v = r.backward_pass(v, pos, wiring=w)
         return v
 
     def reset(self, positions=None):

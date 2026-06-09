@@ -8,17 +8,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
+from enigma_net.sinkhorn import Sinkhorn
 from visualiser import visualise
 
-learner = EnigmaNet(config3, load_target=False)
+sinkhorn = Sinkhorn(tau=0.5, iterations=10)
+learner = EnigmaNet(config3, load_target=False, sinkhorn=None)
 target = EnigmaNet(config3, load_target=True)
+
+with torch.no_grad():
+    for r in learner.rotors:
+        r.wiring.copy_(sinkhorn(r.wiring))
 
 optimizer = torch.optim.Adam(learner.parameters(), lr=0.01)
 loss_fn = nn.CrossEntropyLoss()
 
 print("Training...")
-for step in range(5000):
-    positions = [random.randint(0, 2) for _ in range(3)]
+for step in range(1000):
+    positions = [random.randint(0, 1) for i in range(3)]
     char_idx = random.randint(0, 2)
     
     target.reset(positions)
@@ -35,13 +41,17 @@ for step in range(5000):
     loss.backward()
     optimizer.step()
     
-    if step % 50 == 0:
+    with torch.no_grad():
+        for r in learner.rotors:
+            r.wiring.copy_(sinkhorn(r.wiring))
+    
+    if step % 1000 == 0:
         print(f"step {step}, loss {loss.item():.4f}")
 
 print("\nValidation:")
 correct = 0
 for i in range(10):
-    positions = [random.randint(0, 2) for _ in range(3)]
+    positions = [random.randint(0, 1) for _ in range(3)]
     plaintext = "".join(random.choice("ABC") for _ in range(5))
     
     learner.reset(positions)

@@ -6,9 +6,11 @@ class RotorLayer(nn.Module):
         super().__init__()
         self.wiring = nn.Parameter(wiring if wiring is not None else torch.randn(size, size))
 
-    def forward(self, v, position):
-        return torch.roll(self.wiring @ torch.roll(v, position), -position)
+    def forward(self, v, position, wiring=None):
+        w = wiring if wiring is not None else self.wiring
+        return torch.roll(w @ torch.roll(v, position), -position)
 
-    def backward_pass(self, v, position):
-        return torch.roll(self.wiring.T @ torch.roll(v, position), -position)
+    def backward_pass(self, v, position, wiring=None):
+        w = wiring if wiring is not None else self.wiring
+        return torch.roll(w.T @ torch.roll(v, position), -position)
 
