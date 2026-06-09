@@ -8,22 +8,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
-from enigma_net.sinkhorn import Sinkhorn
 from visualiser import visualise
 
-sinkhorn = Sinkhorn(tau=0.5, iterations=10)
-learner = EnigmaNet(config3, load_target=False, sinkhorn=None)
+learner = EnigmaNet(config3, load_target=False, tau=0.5, iterations=10)
 target = EnigmaNet(config3, load_target=True)
-
-with torch.no_grad():
-    for r in learner.rotors:
-        r.wiring.copy_(sinkhorn(r.wiring))
 
 optimizer = torch.optim.Adam(learner.parameters(), lr=0.01)
 loss_fn = nn.CrossEntropyLoss()
 
 print("Training...")
-for step in range(1000):
+for step in range(100_000):
     positions = [random.randint(0, 1) for i in range(3)]
     char_idx = random.randint(0, 2)
     
@@ -40,10 +34,6 @@ for step in range(1000):
     loss = loss_fn(learner_out.unsqueeze(0), target_label.unsqueeze(0))
     loss.backward()
     optimizer.step()
-    
-    with torch.no_grad():
-        for r in learner.rotors:
-            r.wiring.copy_(sinkhorn(r.wiring))
     
     if step % 1000 == 0:
         print(f"step {step}, loss {loss.item():.4f}")

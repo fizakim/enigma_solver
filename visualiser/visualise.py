@@ -23,7 +23,7 @@ def visualise(net, target_sim, show_active=True):
         axes[0, col].imshow(M_rotor, cmap='Blues', vmin=0, vmax=1)
         axes[0, col].set_title(f"Rotor {rotor_idx + 1}")
         
-        W_rotor = net_r.wiring.detach().cpu().numpy()
+        W_rotor = net_r.get_wiring().detach().cpu().numpy()
         if show_active:
             W_rotor = np.roll(np.roll(W_rotor, -p_n, axis=1), -p_n, axis=0)
             
