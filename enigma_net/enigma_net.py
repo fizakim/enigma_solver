@@ -48,6 +48,12 @@ class EnigmaNet(nn.Module):
             positions = [0] * len(self.rotors)
         self.positions = [self.config.parse_position(p) for p in positions]
 
+    def set_tau(self, tau):
+        for r in self.rotors:
+            if r.sinkhorn is not None:
+                r.sinkhorn.tau = tau
+
+
     def encrypt_string(self, text):
         res = []
         for c in text:

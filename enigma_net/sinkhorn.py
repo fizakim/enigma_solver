@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class Sinkhorn(nn.Module):
-    def __init__(self, tau=0.1, iterations=10):
+    def __init__(self, tau=0.1, iterations=5):
         super().__init__()
         self.tau = tau
         self.iterations = iterations

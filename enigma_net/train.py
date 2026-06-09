@@ -10,14 +10,23 @@ from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
 from visualiser import visualise
 
-learner = EnigmaNet(config3, load_target=False, tau=0.5, iterations=10)
+tau_start = 2
+tau_end = 0.05
+total_steps = 100_000
+
+learner = EnigmaNet(config3, load_target=False, tau=tau_start, iterations=10)
 target = EnigmaNet(config3, load_target=True)
 
 optimizer = torch.optim.Adam(learner.parameters(), lr=0.01)
 loss_fn = nn.CrossEntropyLoss()
 
 print("Training...")
-for step in range(100_000):
+tau = tau_start
+for step in range(total_steps):
+    if step % 100 == 0:
+        tau = tau_start * (tau_end / tau_start) ** (step / total_steps)
+        learner.set_tau(tau)
+    
     positions = [random.randint(0, 1) for i in range(3)]
     char_idx = random.randint(0, 2)
     
@@ -36,7 +45,7 @@ for step in range(100_000):
     optimizer.step()
     
     if step % 1000 == 0:
-        print(f"step {step}, loss {loss.item():.4f}")
+        print(f"step {step}, loss {loss.item():.4f}, tau {tau:.4f}")
 
 print("\nValidation:")
 correct = 0
