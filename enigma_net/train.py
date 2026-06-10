@@ -12,9 +12,10 @@ from visualiser import visualise
 
 tau_start = 2
 tau_end = 0.1
-total_steps = 250
-n_tau_iters = total_steps*0.8
+total_steps = 2000
+n_tau_iters = int(total_steps*0.9)
 log_step = 500
+len_string = 27
 
 
 learner = EnigmaNet(config3, load_target=False, tau=tau_start, iterations=10)
@@ -33,8 +34,8 @@ for step in range(total_steps):
             tau = tau_end
         learner.set_tau(tau)
     
-    positions = [random.randint(0, 1) for i in range(3)]
-    plaintext = "".join(random.choice("ABC") for _ in range(10))
+    positions = [random.randint(0, 2) for i in range(3)]
+    plaintext = "".join(random.choice("ABC") for _ in range(len_string))
     
     target.reset(positions)
     learner.reset(positions)
