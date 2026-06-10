@@ -12,11 +12,13 @@ from visualiser import visualise
 
 tau_start = 2
 tau_end = 0.1
-n_tau_iters = 80_000
-total_steps = 100_000
+total_steps = 250
+n_tau_iters = total_steps*0.8
+log_step = 500
+
 
 learner = EnigmaNet(config3, load_target=False, tau=tau_start, iterations=10)
-target = EnigmaNet(config3, load_target=True)
+target = config3.build()
 
 optimizer = torch.optim.Adam(learner.parameters(), lr=0.01)
 loss_fn = nn.CrossEntropyLoss()
@@ -32,36 +34,40 @@ for step in range(total_steps):
         learner.set_tau(tau)
     
     positions = [random.randint(0, 1) for i in range(3)]
-    char_idx = random.randint(0, 2)
+    plaintext = "".join(random.choice("ABC") for _ in range(10))
     
     target.reset(positions)
-    input_vec = torch.zeros(3)
-    input_vec[char_idx] = 1.0
-    with torch.no_grad():
-        target_out = target(input_vec)
-    target_label = torch.argmax(target_out)
-    
     learner.reset(positions)
     optimizer.zero_grad()
-    learner_out = learner(input_vec)
-    loss = loss_fn(learner_out.unsqueeze(0), target_label.unsqueeze(0))
-    loss.backward()
+    
+    total_loss = 0.0
+    for c in plaintext:
+        input_vec = torch.zeros(3)
+        input_vec[learner.char_to_idx[c]] = 1.0
+        
+        target_char = target.encrypt_char(c)
+        target_label = torch.tensor(learner.char_to_idx[target_char], dtype=torch.long)
+        
+        learner_out = learner(input_vec)
+        total_loss = total_loss + loss_fn(learner_out.unsqueeze(0), target_label.unsqueeze(0))
+    
+    total_loss.backward()
     optimizer.step()
     
-    if step % 1000 == 0:
-        print(f"step {step}, loss {loss.item():.4f}, tau {tau:.4f}")
+    if step % log_step  == 0:
+        print(f"step {step}, loss {total_loss.item():.4f}, tau {tau:.4f}")
 
 print("\nValidation:")
 correct = 0
 for i in range(10):
-    positions = [random.randint(0, 1) for _ in range(3)]
-    plaintext = "".join(random.choice("ABC") for _ in range(5))
+    positions = [random.randint(0, 2) for _ in range(3)]
+    plaintext = "".join(random.choice("ABC") for _ in range(10))
     
     learner.reset(positions)
     target.reset(positions)
     
     learner_out = learner.encrypt_string(plaintext)
-    target_out = target.encrypt_string(plaintext)
+    target_out = target.encrypt(plaintext)
     if learner_out == target_out:
         correct += 1
     print(f"<{learner_out == target_out}> pos={positions} input='{plaintext}' learner='{learner_out}' target='{target_out}'")
