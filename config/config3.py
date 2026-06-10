@@ -9,9 +9,9 @@ abc_path = os.path.join(config_dir, "..", "language", "abc.txt")
 config3 = EnigmaConfig(
     alphabet="ABC",
     rotors=[
-        RotorConfig(wiring="BCA", notch="B"),
-        RotorConfig(wiring="CAB", notch="B"),
-        RotorConfig(wiring="ABC", notch="B"),
+        RotorConfig(wiring="BAC", notch="B"),
+        RotorConfig(wiring="ACB", notch="B"),
+        RotorConfig(wiring="CBA", notch="B"),
     ],
     reflector="BAC",
     plugboard_pairs=[],
