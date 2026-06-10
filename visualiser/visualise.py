@@ -23,6 +23,13 @@ def visualise(net, target_sim, show_active=True):
         axes[0, col].imshow(M_rotor, cmap='Blues', vmin=0, vmax=1)
         axes[0, col].set_title(f"Rotor {rotor_idx + 1}")
         
+        for r in range(n):
+            for c_val in range(n):
+                val = M_rotor[r, c_val]
+                text_str = f"{int(round(val))}" if abs(val - round(val)) < 1e-4 else f"{val:.2f}"
+                color = "white" if val > 0.5 else "black"
+                axes[0, col].text(c_val, r, text_str, ha="center", va="center", color=color, fontsize=10)
+        
         W_rotor = net_r.get_wiring().detach().cpu().numpy()
         if show_active:
             W_rotor = np.roll(np.roll(W_rotor, -p_n, axis=1), -p_n, axis=0)
@@ -32,11 +39,32 @@ def visualise(net, target_sim, show_active=True):
         axes[1, col].set_title(f"Rotor {rotor_idx + 1} Weights")
         fig.colorbar(im, ax=axes[1, col], fraction=0.046, pad=0.04)
 
-    axes[0, K].imshow(target_sim.reflector.matrix, cmap='Blues', vmin=0, vmax=1)
+        for r in range(n):
+            for c_val in range(n):
+                val = W_rotor[r, c_val]
+                text_str = f"{val:.2f}"
+                color = "white" if abs(val) > max_abs * 0.5 else "black"
+                axes[1, col].text(c_val, r, text_str, ha="center", va="center", color=color, fontsize=10)
+
+    target_ref = target_sim.reflector.matrix
+    axes[0, K].imshow(target_ref, cmap='Blues', vmin=0, vmax=1)
     axes[0, K].set_title("Reflector")
+    for r in range(n):
+        for c_val in range(n):
+            val = target_ref[r, c_val]
+            text_str = f"{int(round(val))}" if abs(val - round(val)) < 1e-4 else f"{val:.2f}"
+            color = "white" if val > 0.5 else "black"
+            axes[0, K].text(c_val, r, text_str, ha="center", va="center", color=color, fontsize=10)
     
-    axes[1, K].imshow(net.reflector.detach().cpu().numpy(), cmap='Blues', vmin=0, vmax=1)
+    net_ref = net.reflector.detach().cpu().numpy()
+    axes[1, K].imshow(net_ref, cmap='Blues', vmin=0, vmax=1)
     axes[1, K].set_title("Reflector")
+    for r in range(n):
+        for c_val in range(n):
+            val = net_ref[r, c_val]
+            text_str = f"{val:.2f}"
+            color = "white" if val > 0.5 else "black"
+            axes[1, K].text(c_val, r, text_str, ha="center", va="center", color=color, fontsize=10)
 
     for ax in axes.flat:
         ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
