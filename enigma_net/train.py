@@ -11,7 +11,8 @@ from enigma_net.enigma_net import EnigmaNet
 from visualiser import visualise
 
 tau_start = 2
-tau_end = 0.05
+tau_end = 0.1
+n_tau_iters = 80_000
 total_steps = 100_000
 
 learner = EnigmaNet(config3, load_target=False, tau=tau_start, iterations=10)
@@ -24,7 +25,10 @@ print("Training...")
 tau = tau_start
 for step in range(total_steps):
     if step % 100 == 0:
-        tau = tau_start * (tau_end / tau_start) ** (step / total_steps)
+        if step < n_tau_iters:
+            tau = tau_start * (tau_end / tau_start) ** (step / n_tau_iters)
+        else:
+            tau = tau_end
         learner.set_tau(tau)
     
     positions = [random.randint(0, 1) for i in range(3)]
