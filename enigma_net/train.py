@@ -1,6 +1,7 @@
 import sys
 import os
 import random
+from datetime import datetime
 import torch
 import torch.nn as nn
 
@@ -8,7 +9,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
+from enigma_net.compare import compare
 from visualiser import visualise
+
 
 tau_start = 2
 tau_end = 0.1
@@ -58,21 +61,15 @@ for step in range(total_steps):
     if step % log_step  == 0:
         print(f"step {step}, loss {total_loss.item():.4f}, tau {tau:.4f}")
 
-print("\nValidation:")
-correct = 0
-for i in range(10):
-    positions = [random.randint(0, 2) for _ in range(3)]
-    plaintext = "".join(random.choice("ABC") for _ in range(10))
-    
-    learner.reset(positions)
-    target.reset(positions)
-    
-    learner_out = learner.encrypt_string(plaintext)
-    target_out = target.encrypt(plaintext)
-    if learner_out == target_out:
-        correct += 1
-    print(f"<{learner_out == target_out}> pos={positions} input='{plaintext}' learner='{learner_out}' target='{target_out}'")
+models_dir = os.path.join(os.path.dirname(__file__), "models")
+os.makedirs(models_dir, exist_ok=True)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+weights_path = os.path.join(models_dir, f"learner_{timestamp}.pth")
+torch.save(learner.state_dict(), weights_path)
+print(f"Saved trained learner weights to '{weights_path}'")
 
-print(f"Accuracy: {correct}/10")
+print("\nRunning compare.py evaluation...")
+
+compare(weights_path)
 
 visualise(learner, config3.build(), show_active=False)
