@@ -14,7 +14,7 @@ from visualiser import visualise
 from enigma_net.supervised.config import config3_supervised as config
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 1500
+TOTAL_STEPS = 1000
 LOG_STEP = 100
 TAU_START = 1.0
 TAU_END = 0.01

@@ -57,13 +57,15 @@ def visualise(net, target_sim, show_active=True):
             axes[0, K].text(c_val, r, text_str, ha="center", va="center", color=color, fontsize=10)
     
     net_ref = net.reflector.detach().cpu().numpy()
-    axes[1, K].imshow(net_ref, cmap='Blues', vmin=0, vmax=1)
+    max_abs_ref = max(1.0, float(np.max(np.abs(net_ref))))
+    im_ref = axes[1, K].imshow(net_ref, cmap='coolwarm', vmin=-max_abs_ref, vmax=max_abs_ref)
     axes[1, K].set_title("Reflector")
+    fig.colorbar(im_ref, ax=axes[1, K], fraction=0.046, pad=0.04)
     for r in range(n):
         for c_val in range(n):
             val = net_ref[r, c_val]
             text_str = f"{val:.2f}"
-            color = "white" if val > 0.5 else "black"
+            color = "white" if abs(val) > max_abs_ref * 0.5 else "black"
             axes[1, K].text(c_val, r, text_str, ha="center", va="center", color=color, fontsize=10)
 
     for ax in axes.flat:

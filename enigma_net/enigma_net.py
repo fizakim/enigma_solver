@@ -81,6 +81,8 @@ class EnigmaNet(nn.Module):
         for r in self.rotors:
             if r.sinkhorn is not None:
                 r.sinkhorn.tau = tau
+        if hasattr(self, "reflector_sinkhorn") and self.reflector_sinkhorn is not None:
+            self.reflector_sinkhorn.tau = tau
 
 
     def encrypt_string(self, text, greedy=False):

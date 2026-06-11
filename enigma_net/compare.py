@@ -14,8 +14,10 @@ def compare(weights_path=None, config=config3):
         models_dir = os.path.join(os.path.dirname(__file__), "models")
         weights_path = max(glob.glob(os.path.join(models_dir, "learner_*.pth")))
         
-    learner = EnigmaNet(config)
-    learner.load_state_dict(torch.load(weights_path))
+    state_dict = torch.load(weights_path)
+    trainable_reflector = "reflector_logits" in state_dict
+    learner = EnigmaNet(config, trainable_reflector=trainable_reflector)
+    learner.load_state_dict(state_dict)
     learner.eval()
     
     target = config.build()

@@ -6,5 +6,5 @@ config3_supervised = TrainingConfig(
     enigma_config=config3,
     loss_fn=torch.nn.CrossEntropyLoss(),
     trainable_rotors=None,
-    trainable_reflector=False,
+    trainable_reflector=True,
 )
