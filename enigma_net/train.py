@@ -13,11 +13,11 @@ from enigma_net.compare import compare
 from visualiser import visualise
 
 
-tau_start = 2
+tau_start = 1
 tau_end = 0.1
-total_steps = 1000
-n_tau_iters = int(total_steps*0.9)
-log_step = 500
+total_steps = 500
+n_tau_iters = total_steps*0.9
+log_step = 100
 len_string = 27
 
 

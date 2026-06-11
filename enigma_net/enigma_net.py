@@ -54,7 +54,7 @@ class EnigmaNet(nn.Module):
                 r.sinkhorn.tau = tau
 
 
-    def encrypt_string(self, text):
+    def encrypt_string(self, text, greedy=False):
         res = []
         for c in text:
             if c not in self.char_to_idx:
@@ -63,6 +63,10 @@ class EnigmaNet(nn.Module):
             v = torch.zeros(self.n)
             v[self.char_to_idx[c]] = 1.0
             out = torch.softmax(self.forward(v), dim=-1)
-            res.append(self.alphabet[torch.argmax(out).item()])
+            if greedy:
+                idx = torch.argmax(out).item()
+            else:
+                idx = torch.multinomial(out, 1).item()
+            res.append(self.alphabet[idx])
         return "".join(res)
 

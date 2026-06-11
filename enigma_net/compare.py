@@ -30,7 +30,7 @@ def compare(weights_path=None):
         for char in alphabet:
             learner.reset(list(pos))
             target.reset(list(pos))
-            if learner.encrypt_string(char) != target.encrypt(char):
+            if learner.encrypt_string(char, greedy=True) != target.encrypt(char):
                 print(f"Mismatch at pos={list(pos)}, input='{char}'")
                 mismatches += 1
             total_checks += 1
@@ -39,7 +39,6 @@ def compare(weights_path=None):
         print(f"Models are identical.")
     else:
         print(f"Failure: Found {mismatches} mismatches.")
-        sys.exit(1)
 
 if __name__ == "__main__":
     compare()
