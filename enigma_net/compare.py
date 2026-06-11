@@ -1,44 +1,53 @@
 import os
-import sys
 import glob
 import itertools
 import torch
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
 
-def compare(weights_path=None):
-    if weights_path is None:
+def compare(weights_path=None, config=config3):
+    if not weights_path:
         models_dir = os.path.join(os.path.dirname(__file__), "models")
         weights_path = max(glob.glob(os.path.join(models_dir, "learner_*.pth")))
         
-    learner = EnigmaNet(config3, load_target=False)
+    learner = EnigmaNet(config)
     learner.load_state_dict(torch.load(weights_path))
     learner.eval()
     
-    target = config3.build()
+    target = config.build()
     
-    alphabet = config3.alphabet
-    n_rotors = len(config3.rotors)
-    all_positions = list(itertools.product(range(len(alphabet)), repeat=n_rotors))
+    target_reflector = torch.from_numpy(target.reflector.matrix).float()
+    target_plugboard = torch.from_numpy(target.plugboard.matrix).float()
+    target_wiring = [torch.from_numpy(r.matrix).float() for r in target.rotors]
     
-    total_checks = 0
+    learner_reflector = learner.reflector
+    learner_wiring = [r.get_wiring() for r in learner.rotors]
+    
+    def compute_matrix(wirings, reflector, positions, plugboard=None):
+        M_fwd = torch.eye(reflector.shape[0])
+        for W, p in zip(wirings, positions):
+            M_fwd = M_fwd @ torch.roll(W, shifts=(-p, -p), dims=(0, 1))
+        E = M_fwd.T @ reflector @ M_fwd
+        return plugboard @ E @ plugboard if plugboard is not None else E
+
     mismatches = 0
+    all_positions = itertools.product(range(len(config.alphabet)), repeat=len(config.rotors))
     
     for pos in all_positions:
-        for char in alphabet:
-            learner.reset(list(pos))
-            target.reset(list(pos))
-            if learner.encrypt_string(char, greedy=True) != target.encrypt(char):
-                print(f"Mismatch at pos={list(pos)}, input='{char}'")
-                mismatches += 1
-            total_checks += 1
+        learner.reset(pos)
+        learner.step()
+        
+        target.reset(pos)
+        for r in reversed(target.rotors):
+            if not r.step():
+                break
+        
+        E_learner = compute_matrix(learner_wiring, learner_reflector, [int(p) for p in learner.positions])
+        E_target = compute_matrix(target_wiring, target_reflector, [int(r.position) for r in target.rotors], target_plugboard)
+        
+        mismatches += torch.sum(torch.argmax(E_learner, dim=0) != torch.argmax(E_target, dim=0)).item()
             
-    if mismatches == 0:
-        print(f"Models are identical.")
-    else:
-        print(f"Failure: Found {mismatches} mismatches.")
+    print("Models are identical." if mismatches == 0 else f"Failure: Found {mismatches} mismatches.")
 
 if __name__ == "__main__":
     compare()
