@@ -1,7 +1,11 @@
+import sys
 import os
 import glob
 import itertools
 import torch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from config.config3 import config3
 from enigma_net.enigma_net import EnigmaNet
 
@@ -31,6 +35,7 @@ def compare(weights_path=None, config=config3):
         return plugboard @ E @ plugboard if plugboard is not None else E
 
     mismatches = 0
+    frob_diff = 0.0
     all_positions = itertools.product(range(len(config.alphabet)), repeat=len(config.rotors))
     
     for pos in all_positions:
@@ -46,8 +51,11 @@ def compare(weights_path=None, config=config3):
         E_target = compute_matrix(target_wiring, target_reflector, [int(r.position) for r in target.rotors], target_plugboard)
         
         mismatches += torch.sum(torch.argmax(E_learner, dim=0) != torch.argmax(E_target, dim=0)).item()
+        frob_diff += torch.norm(E_learner - E_target).item()
             
-    print("Models are identical." if mismatches == 0 else f"Failure: Found {mismatches} mismatches.")
+    print("argmax models are identical." if mismatches == 0 else f"Failure: Found {mismatches} mismatches.")
+    print(f"Frobenius norm diff: {frob_diff:.4f}")
+
 
 if __name__ == "__main__":
     compare()

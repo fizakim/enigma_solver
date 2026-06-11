@@ -14,8 +14,8 @@ from visualiser import visualise
 
 
 tau_start = 1
-tau_end = 0.1
-total_steps = 500
+tau_end = 0.01
+total_steps = 400
 n_tau_iters = total_steps*0.9
 log_step = 100
 len_string = 27
