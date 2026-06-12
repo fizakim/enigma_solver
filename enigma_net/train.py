@@ -18,7 +18,7 @@ from config.config26 import config26
 from config.config10 import config10
 
 train_config = TrainConfig(
-    enigma_config=config3,
+    enigma_config=config10,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=True,
@@ -33,7 +33,7 @@ TAU_END = 0.01
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
-LEN_STRING = len(train_config.enigma_config.alphabet) * 9
+LEN_STRING = 50
 
 
 learner = EnigmaNet(
@@ -96,4 +96,4 @@ print(f"Saved trained learner weights to '{weights_path}'")
 print("\nRunning compare.py evaluation...")
 compare(weights_path, config=train_config.enigma_config)
 
-visualise(learner, train_config.enigma_config.build(), show_active=False)
+visualise(learner, train_config.enigma_config.build(), show_active=False,show_numbers=False)
