@@ -13,12 +13,14 @@ from visualiser import visualise
 
 from enigma_net import CrossEntropyLoss
 from enigma_net.train_config import TrainConfig
-from config.config3 import config3
-from config.config26 import config26
-from config.config10 import config10
+from config.alphabet3 import alphabet3
+from config.alphabet5 import alphabet5
+from config.alphabet10 import alphabet10
+from config.alphabet15 import alphabet15
+from config.alphabet26 import alphabet26
 
 train_config = TrainConfig(
-    enigma_config=config10,
+    enigma_config=alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=True,
@@ -33,7 +35,7 @@ TAU_END = 0.01
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
-LEN_STRING = 50
+LEN_STRING = 27
 
 
 learner = EnigmaNet(

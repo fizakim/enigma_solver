@@ -1,9 +1,9 @@
-from config.config3 import config3
+from config.alphabet3 import alphabet3
 from enigma_net import CrossEntropyLoss
-from enigma_net.train_config import TrainingConfig
+from enigma_net.train_config import TrainConfig
 
-config3_supervised = TrainingConfig(
-    enigma_config=config3,
+alphabet3_supervised = TrainConfig(
+    enigma_config=alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=True,

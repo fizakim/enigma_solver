@@ -1,9 +1,9 @@
 import sys
 sys.path.append(".")
-from config.config3 import config3
+from config.alphabet3 import alphabet3
 from enigma_net.enigma_net import EnigmaNet
 
-net = EnigmaNet(config3)
+net = EnigmaNet(alphabet3)
 
 net.reset([0, 0, 0])
 

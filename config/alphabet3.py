@@ -3,9 +3,9 @@ from .base import EnigmaConfig, RotorConfig
 from language import Language
 
 config_dir = os.path.dirname(__file__)
-abc_path = os.path.join(config_dir, "..", "language", "abc.txt")
+words3_path = os.path.join(config_dir, "..", "language", "words3.txt")
 
-config3 = EnigmaConfig(
+alphabet3 = EnigmaConfig(
     alphabet="ABC",
     rotors=[
         RotorConfig(wiring="BAC", notch="B"),
@@ -14,6 +14,5 @@ config3 = EnigmaConfig(
     ],
     reflector="BAC",
     plugboard_pairs=[],
-    language=Language(abc_path)
+    language=Language(words3_path)
 )
-

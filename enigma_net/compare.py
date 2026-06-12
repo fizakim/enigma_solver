@@ -6,10 +6,10 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config.config3 import config3
+from config.alphabet3 import alphabet3
 from enigma_net.enigma_net import EnigmaNet
 
-def compare(weights_path=None, config=config3):
+def compare(weights_path=None, config=alphabet3):
     if not weights_path:
         models_dir = os.path.join(os.path.dirname(__file__), "models")
         weights_path = max(glob.glob(os.path.join(models_dir, "learner_*.pth")))

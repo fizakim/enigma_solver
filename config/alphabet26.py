@@ -1,6 +1,6 @@
 from .base import EnigmaConfig, RotorConfig
 
-config26 = EnigmaConfig(
+alphabet26 = EnigmaConfig(
     alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     rotors=[
         RotorConfig(wiring="EKMFLGDQVZNTOWYHXUSPAIBRCJ", notch="Q"),
@@ -10,4 +10,3 @@ config26 = EnigmaConfig(
     reflector="YRUHQSLDPXNGOKMIEBFZCWVJAT",
     plugboard_pairs=[]
 )
-
