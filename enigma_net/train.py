@@ -11,35 +11,48 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net.supervised.config import config3_supervised as config
+from enigma_net import CrossEntropyLoss
+from enigma_net.train_config import TrainConfig
+from config.config3 import config3
+from config.config26 import config26
+from config.config10 import config10
+
+train_config = TrainConfig(
+    enigma_config=config3,
+    loss_fn=CrossEntropyLoss(),
+    trainable_rotors=None,
+    trainable_reflector=True,
+)
+
 
 LEARNING_RATE = 0.1
 TOTAL_STEPS = 1000
 LOG_STEP = 100
 TAU_START = 1.0
 TAU_END = 0.01
-N_TAU_ITERS = TOTAL_STEPS*0.9
+N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
-LEN_STRING = 27
+LEN_STRING = len(train_config.enigma_config.alphabet) * 9
+
 
 learner = EnigmaNet(
-    config.enigma_config, 
+    train_config.enigma_config, 
     load_target=False, 
     tau=TAU_START, 
     iterations=ITERATIONS,
-    trainable_rotors=config.trainable_rotors,
-    trainable_reflector=config.trainable_reflector
+    trainable_rotors=train_config.trainable_rotors,
+    trainable_reflector=False
 )
-target = config.enigma_config.build()
+target = train_config.enigma_config.build()
 
 optimizer = OPTIMIZER_CLASS(learner.parameters(), lr=LEARNING_RATE)
-loss_fn = config.loss_fn
+loss_fn = train_config.loss_fn
 
 print("Training...")
 tau = TAU_START
-n_alphabet = len(config.enigma_config.alphabet)
-n_rotors = len(config.enigma_config.rotors)
+n_alphabet = len(train_config.enigma_config.alphabet)
+n_rotors = len(train_config.enigma_config.rotors)
 
 for step in range(TOTAL_STEPS):
     if step % 100 == 0:
@@ -50,7 +63,7 @@ for step in range(TOTAL_STEPS):
         learner.set_tau(tau)
     
     positions = [random.randint(0, n_alphabet - 1) for _ in range(n_rotors)]
-    plaintext = "".join(random.choice(config.enigma_config.alphabet) for _ in range(LEN_STRING))
+    plaintext = "".join(random.choice(train_config.enigma_config.alphabet) for _ in range(LEN_STRING))
     
     target.reset(positions)
     learner.reset(positions)
@@ -81,6 +94,6 @@ torch.save(learner.state_dict(), weights_path)
 print(f"Saved trained learner weights to '{weights_path}'")
 
 print("\nRunning compare.py evaluation...")
-compare(weights_path, config=config.enigma_config)
+compare(weights_path, config=train_config.enigma_config)
 
-visualise(learner, config.enigma_config.build(), show_active=False)
+visualise(learner, train_config.enigma_config.build(), show_active=False)

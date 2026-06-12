@@ -4,7 +4,7 @@ from .supervised.cross_entropy import CrossEntropyLoss
 
 _DEFAULT = object()
 
-class TrainingConfig:
+class TrainConfig:
     def __init__(
         self,
         enigma_config: EnigmaConfig,
