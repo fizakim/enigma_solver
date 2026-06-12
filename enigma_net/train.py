@@ -20,7 +20,7 @@ from config.alphabet15 import alphabet15
 from config.alphabet26 import alphabet26
 
 train_config = TrainConfig(
-    enigma_config=alphabet3,
+    enigma_config=alphabet5,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=True,
@@ -28,14 +28,14 @@ train_config = TrainConfig(
 
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 1000
+TOTAL_STEPS = 5000
 LOG_STEP = 100
 TAU_START = 1.0
-TAU_END = 0.01
+TAU_END = 0.1
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
-LEN_STRING = 27
+LEN_STRING = 5 ** 3
 
 
 learner = EnigmaNet(
