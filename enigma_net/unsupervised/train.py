@@ -10,7 +10,7 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net import NgramLoss, CycleLoss
+from enigma_net import NgramLoss, CycleLoss, NoFixedPointLoss
 from enigma_net.train_config import TrainConfig
 from n_gram.generator import load_ngram_counts
 from config.alphabet3 import alphabet3
@@ -29,6 +29,7 @@ train_config = TrainConfig(
 )
 
 cycle_loss_fn = CycleLoss()
+no_fixed_point_loss_fn = NoFixedPointLoss()
 
 
 LEARNING_RATE = 0.1
@@ -41,6 +42,7 @@ ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
 LEN_STRING = 5 ** 3
 CYCLE_WEIGHT = 1.0
+NO_FIXED_POINT_WEIGHT = 1.0
 
 
 learner = EnigmaNet(
@@ -86,13 +88,14 @@ for step in range(TOTAL_STEPS):
     predictions = torch.stack(outputs)
     ngram_loss = loss_fn(predictions)
     cycle_loss = cycle_loss_fn(learner, inputs, positions)
-    total_loss = ngram_loss + CYCLE_WEIGHT * cycle_loss
+    no_fixed_point_loss = no_fixed_point_loss_fn(learner, inputs, positions)
+    total_loss = ngram_loss + CYCLE_WEIGHT * cycle_loss + NO_FIXED_POINT_WEIGHT * no_fixed_point_loss
 
     total_loss.backward()
     optimizer.step()
 
     if step % LOG_STEP == 0:
-        print(f"step {step}, loss {total_loss.item():.6f}, ngram {ngram_loss.item():.6f}, cycle {cycle_loss.item():.6f}, tau {tau:.4f}")
+        print(f"step {step}, loss {total_loss.item():.6f}, ngram {ngram_loss.item():.6f}, cycle {cycle_loss.item():.6f}, no_fixed_point {no_fixed_point_loss.item():.6f}, tau {tau:.4f}")
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
