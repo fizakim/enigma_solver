@@ -39,7 +39,8 @@ TAU_END = 0.01
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
-LEN_STRING = 3 ** 3
+LEN_STRING = 5 ** 3
+CYCLE_WEIGHT = 1.0
 
 
 learner = EnigmaNet(
@@ -85,7 +86,7 @@ for step in range(TOTAL_STEPS):
     predictions = torch.stack(outputs)
     ngram_loss = loss_fn(predictions)
     cycle_loss = cycle_loss_fn(learner, inputs, positions)
-    total_loss = ngram_loss + cycle_loss
+    total_loss = ngram_loss + CYCLE_WEIGHT * cycle_loss
 
     total_loss.backward()
     optimizer.step()

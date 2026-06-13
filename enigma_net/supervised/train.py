@@ -11,7 +11,7 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net import CrossEntropyLoss
+from enigma_net import CrossEntropyLoss, CycleLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
@@ -20,7 +20,7 @@ from config.alphabet15 import alphabet15
 from config.alphabet26 import alphabet26
 
 train_config = TrainConfig(
-    enigma_config=alphabet3,
+    enigma_config=alphabet5,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=True,
@@ -28,14 +28,15 @@ train_config = TrainConfig(
 
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 1000
-LOG_STEP = 100
+TOTAL_STEPS = 100
+LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
 LEN_STRING = 3 ** 3
+CYCLE_WEIGHT = 1.0
 
 
 learner = EnigmaNet(
@@ -47,6 +48,7 @@ learner = EnigmaNet(
     trainable_reflector=train_config.trainable_reflector
 )
 target = train_config.enigma_config.build()
+cycle_loss_fn = CycleLoss()
 
 optimizer = OPTIMIZER_CLASS(learner.parameters(), lr=LEARNING_RATE)
 loss_fn = train_config.loss_fn
@@ -71,22 +73,27 @@ for step in range(TOTAL_STEPS):
     learner.reset(positions)
     optimizer.zero_grad()
     
-    total_loss = 0.0
+    ce_loss = 0.0
+    inputs = []
     for c in plaintext:
         input_vec = torch.zeros(n_alphabet)
         input_vec[learner.char_to_idx[c]] = 1.0
+        inputs.append(input_vec)
         
         target_char = target.encrypt_char(c)
         target_label = torch.tensor(learner.char_to_idx[target_char], dtype=torch.long)
         
         learner_out = learner(input_vec)
-        total_loss = total_loss + loss_fn(learner_out.unsqueeze(0), target_label.unsqueeze(0))
+        ce_loss = ce_loss + loss_fn(learner_out.unsqueeze(0), target_label.unsqueeze(0))
+    
+    cycle_loss = cycle_loss_fn(learner, inputs, positions)
+    total_loss = ce_loss + CYCLE_WEIGHT * cycle_loss
     
     total_loss.backward()
     optimizer.step()
     
     if step % LOG_STEP == 0:
-        print(f"step {step}, loss {total_loss.item():.4f}, tau {tau:.4f}")
+        print(f"step {step}, loss {total_loss.item():.4f}, ce {ce_loss.item():.4f}, cycle {cycle_loss.item():.4f}, tau {tau:.4f}")
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
@@ -98,4 +105,4 @@ print(f"Saved trained learner weights to '{weights_path}'")
 print("\nRunning compare.py evaluation...")
 compare(weights_path, config=train_config.enigma_config)
 
-visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=False)
+visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=True)
