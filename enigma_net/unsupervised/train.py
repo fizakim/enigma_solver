@@ -10,7 +10,7 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net import NgramLoss
+from enigma_net import NgramLoss, CycleLoss
 from enigma_net.train_config import TrainConfig
 from n_gram.generator import load_ngram_counts
 from config.alphabet3 import alphabet3
@@ -28,12 +28,14 @@ train_config = TrainConfig(
     trainable_reflector=True,
 )
 
+cycle_loss_fn = CycleLoss()
+
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 100000
+TOTAL_STEPS = 1000
 LOG_STEP = 100
 TAU_START = 1.0
-TAU_END = 0.1
+TAU_END = 0.01
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
@@ -71,21 +73,25 @@ for step in range(TOTAL_STEPS):
     learner.reset(positions)
     optimizer.zero_grad()
 
+    inputs = []
     outputs = []
     for c in plaintext:
         input_vec = torch.zeros(n_alphabet)
         input_vec[learner.char_to_idx[c]] = 1.0
+        inputs.append(input_vec)
         learner_out = learner(input_vec)
         outputs.append(learner_out)
 
     predictions = torch.stack(outputs)
-    total_loss = loss_fn(predictions)
+    ngram_loss = loss_fn(predictions)
+    cycle_loss = cycle_loss_fn(learner, inputs, positions)
+    total_loss = ngram_loss + cycle_loss
 
     total_loss.backward()
     optimizer.step()
 
     if step % LOG_STEP == 0:
-        print(f"step {step}, loss {total_loss.item():.6f}, tau {tau:.4f}")
+        print(f"step {step}, loss {total_loss.item():.6f}, ngram {ngram_loss.item():.6f}, cycle {cycle_loss.item():.6f}, tau {tau:.4f}")
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
@@ -97,4 +103,4 @@ print(f"Saved trained learner weights to '{weights_path}'")
 print("\nRunning compare.py evaluation...")
 compare(weights_path, config=train_config.enigma_config)
 
-visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=False)
+visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=True)
