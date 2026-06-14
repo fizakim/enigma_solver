@@ -1,5 +1,5 @@
 import torch
-from enigma_net.permutation.permutation_core import Permutation
+from enigma_net.plackett_luce.core import Permutation
 
 class PermutationSampler:
     @staticmethod

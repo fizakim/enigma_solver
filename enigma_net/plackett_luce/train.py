@@ -10,8 +10,8 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net.permutation.permutation_core import Permutation
-from enigma_net.permutation.permutation_loss import PlackettLuceLoss
+from enigma_net.plackett_luce.core import Permutation
+from enigma_net.plackett_luce.loss import PlackettLuceLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
