@@ -1,6 +1,6 @@
 import torch
 from enigma_net.loss import LossFunction
-from enigma_net.plackett_luce.core import Permutation
+from enigma_net.permutation.plackett_luce.core import Permutation
 
 class PlackettLuceLoss(LossFunction):
     def forward(self, scores, target: Permutation):

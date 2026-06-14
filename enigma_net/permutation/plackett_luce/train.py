@@ -4,14 +4,14 @@ import random
 from datetime import datetime
 import torch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net.plackett_luce.core import Permutation
-from enigma_net.plackett_luce.loss import PlackettLuceLoss
+from enigma_net.permutation.plackett_luce.core import Permutation
+from enigma_net.permutation.plackett_luce.loss import PlackettLuceLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
@@ -84,7 +84,7 @@ for step in range(TOTAL_STEPS):
     if step % LOG_STEP == 0:
         print(f"step {step}, loss {total_loss.item():.4f}, tau {tau:.4f}")
 
-models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 weights_path = os.path.join(models_dir, f"learner_{timestamp}.pth")

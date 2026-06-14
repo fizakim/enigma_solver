@@ -23,4 +23,3 @@ class PermutationLoss(LossFunction):
     def forward(self, predictions, targets):
         return (self.row_cross_entropy_loss(predictions, targets) + 
                 self.column_cross_entropy_loss(predictions, targets)) / 2.0
-
