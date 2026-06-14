@@ -36,9 +36,9 @@ N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
 LEN_STRING = 3 ** 3
-CYCLE_WEIGHT = 0.01
-NO_FIXED_POINT_WEIGHT = 1
-REFLECTOR_WEIGHT = 1.0
+CYCLE_WEIGHT = 0.0
+NO_FIXED_POINT_WEIGHT = 0.0
+REFLECTOR_WEIGHT = 0.0
 
 
 learner = EnigmaNet(
@@ -94,9 +94,9 @@ for step in range(TOTAL_STEPS):
     targets = torch.tensor(target_labels, dtype=torch.long)
     ce_loss = loss_fn(predictions, targets)
     
-    cycle_loss = cycle_loss_fn(learner, inputs, positions)
-    no_fixed_point_loss = no_fixed_point_loss_fn(learner, inputs, positions)
-    if learner.reflector_logits is not None:
+    cycle_loss = cycle_loss_fn(learner, inputs, positions) if CYCLE_WEIGHT else torch.tensor(0.0, device=predictions.device)
+    no_fixed_point_loss = no_fixed_point_loss_fn(learner, inputs, positions) if NO_FIXED_POINT_WEIGHT else torch.tensor(0.0, device=predictions.device)
+    if learner.reflector_logits is not None and REFLECTOR_WEIGHT:
         reflector_loss = reflector_loss_fn(learner)
     else:
         reflector_loss = torch.tensor(0.0, device=predictions.device)
