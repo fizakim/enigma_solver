@@ -3,6 +3,7 @@ from .rotor_layer import RotorLayer
 from .sinkhorn import Sinkhorn
 from .loss import LossFunction
 from .supervised.cross_entropy import CrossEntropyLoss
+from .permutation.permutation_loss import PermutationLoss
 from .unsupervised.ngram_loss import NgramLoss
 
 

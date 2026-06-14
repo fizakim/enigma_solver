@@ -3,3 +3,4 @@ __pycache__
 *.pth
 .pytest_cache
 TODO.md
+notes/
