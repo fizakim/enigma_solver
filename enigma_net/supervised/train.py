@@ -11,7 +11,7 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net import CrossEntropyLoss, CycleLoss, NoFixedPointLoss
+from enigma_net import CrossEntropyLoss, CycleLoss, NoFixedPointLoss, ReflectorLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
@@ -28,7 +28,7 @@ train_config = TrainConfig(
 
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS =  500
+TOTAL_STEPS =  250
 LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1
@@ -38,6 +38,7 @@ OPTIMIZER_CLASS = torch.optim.Adam
 LEN_STRING = 3 ** 3
 CYCLE_WEIGHT = 0.01
 NO_FIXED_POINT_WEIGHT = 1
+REFLECTOR_WEIGHT = 1.0
 
 
 learner = EnigmaNet(
@@ -46,11 +47,12 @@ learner = EnigmaNet(
     tau=TAU_START, 
     iterations=ITERATIONS,
     trainable_rotors=train_config.trainable_rotors,
-    trainable_reflector= True #train_config.trainable_reflector
+    trainable_reflector= train_config.trainable_reflector
 )
 target = train_config.enigma_config.build()
 cycle_loss_fn = CycleLoss()
 no_fixed_point_loss_fn = NoFixedPointLoss()
+reflector_loss_fn = ReflectorLoss()
 
 optimizer = OPTIMIZER_CLASS(learner.parameters(), lr=LEARNING_RATE)
 loss_fn = train_config.loss_fn
@@ -61,12 +63,11 @@ n_alphabet = len(train_config.enigma_config.alphabet)
 n_rotors = len(train_config.enigma_config.rotors)
 
 for step in range(TOTAL_STEPS):
-    if step % 100 == 0:
-        if step < N_TAU_ITERS:
-            tau = TAU_START * (TAU_END / TAU_START) ** (step / N_TAU_ITERS)
-        else:
-            tau = TAU_END
-        learner.set_tau(tau)
+    if step < N_TAU_ITERS:
+        tau = TAU_START * (TAU_END / TAU_START) ** (step / N_TAU_ITERS)
+    else:
+        tau = TAU_END
+    learner.set_tau(tau)
     
     positions = [random.randint(0, n_alphabet - 1) for _ in range(n_rotors)]
     plaintext = "".join(random.choice(train_config.enigma_config.alphabet) for _ in range(LEN_STRING))
@@ -95,13 +96,17 @@ for step in range(TOTAL_STEPS):
     
     cycle_loss = cycle_loss_fn(learner, inputs, positions)
     no_fixed_point_loss = no_fixed_point_loss_fn(learner, inputs, positions)
-    total_loss = ce_loss + CYCLE_WEIGHT * cycle_loss + NO_FIXED_POINT_WEIGHT * no_fixed_point_loss
+    if learner.reflector_logits is not None:
+        reflector_loss = reflector_loss_fn(learner)
+    else:
+        reflector_loss = torch.tensor(0.0, device=predictions.device)
+    total_loss = ce_loss + CYCLE_WEIGHT * cycle_loss + NO_FIXED_POINT_WEIGHT * no_fixed_point_loss + REFLECTOR_WEIGHT * reflector_loss
     
     total_loss.backward()
     optimizer.step()
     
     if step % LOG_STEP == 0:
-        print(f"step {step}, loss {total_loss.item():.4f}, ce {ce_loss.item():.4f}, cycle {cycle_loss.item():.4f}, no_fixed_point {no_fixed_point_loss.item():.4f}, tau {tau:.4f}")
+        print(f"step {step}, loss {total_loss.item():.4f}, ce {ce_loss.item():.4f}, cycle {cycle_loss.item():.4f}, no_fixed_point {no_fixed_point_loss.item():.4f}, reflector {reflector_loss.item():.4f}, tau {tau:.4f}")
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
