@@ -21,5 +21,4 @@ class PermutationLoss(LossFunction):
         return F.nll_loss(log_probs_T, inverse_targets)
 
     def forward(self, predictions, targets):
-        return (self.row_cross_entropy_loss(predictions, targets) + 
-                self.column_cross_entropy_loss(predictions, targets)) / 2.0
+        return self.frobenius_loss(predictions, targets)

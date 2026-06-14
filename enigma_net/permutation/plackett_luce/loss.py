@@ -6,10 +6,9 @@ class PlackettLuceLoss(LossFunction):
     def forward(self, scores, target: Permutation):
         n = scores.shape[0]
         sigma = target.indices
-        nll = 0.0
-        for i in range(n):
-            nll -= torch.log(scores[i, sigma[i]] + 1e-12)
-            mask = torch.ones(n, device=scores.device)
-            mask[sigma[:i]] = 0.0
-            nll += torch.log(torch.sum(scores[i] * mask) + 1e-12)
+        A = scores[:, sigma]
+        suffix_sums = torch.flip(torch.cumsum(torch.flip(A, dims=[1]), dim=1), dims=[1])
+        denom = torch.diagonal(suffix_sums)
+        num = torch.diagonal(A)
+        nll = -torch.log(num + 1e-12).sum() + torch.log(denom + 1e-12).sum()
         return nll / n

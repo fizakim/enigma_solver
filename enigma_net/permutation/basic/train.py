@@ -28,7 +28,7 @@ train_config = TrainConfig(
 
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 200
+TOTAL_STEPS = 100
 LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1
