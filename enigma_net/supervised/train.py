@@ -11,7 +11,7 @@ from enigma_net.enigma_net import EnigmaNet
 from enigma_net.compare import compare
 from visualiser import visualise
 
-from enigma_net import CrossEntropyLoss, CycleLoss, NoFixedPointLoss, ReflectorLoss
+from enigma_net import CrossEntropyLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
@@ -36,9 +36,6 @@ N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
 LEN_STRING = 3 ** 3
-CYCLE_WEIGHT = 0.0
-NO_FIXED_POINT_WEIGHT = 0.0
-REFLECTOR_WEIGHT = 0.0
 
 
 learner = EnigmaNet(
@@ -50,9 +47,6 @@ learner = EnigmaNet(
     trainable_reflector= train_config.trainable_reflector
 )
 target = train_config.enigma_config.build()
-cycle_loss_fn = CycleLoss()
-no_fixed_point_loss_fn = NoFixedPointLoss()
-reflector_loss_fn = ReflectorLoss()
 
 optimizer = OPTIMIZER_CLASS(learner.parameters(), lr=LEARNING_RATE)
 loss_fn = train_config.loss_fn
@@ -94,19 +88,13 @@ for step in range(TOTAL_STEPS):
     targets = torch.tensor(target_labels, dtype=torch.long)
     ce_loss = loss_fn(predictions, targets)
     
-    cycle_loss = cycle_loss_fn(learner, inputs, positions) if CYCLE_WEIGHT else torch.tensor(0.0, device=predictions.device)
-    no_fixed_point_loss = no_fixed_point_loss_fn(learner, inputs, positions) if NO_FIXED_POINT_WEIGHT else torch.tensor(0.0, device=predictions.device)
-    if learner.reflector_logits is not None and REFLECTOR_WEIGHT:
-        reflector_loss = reflector_loss_fn(learner)
-    else:
-        reflector_loss = torch.tensor(0.0, device=predictions.device)
-    total_loss = ce_loss + CYCLE_WEIGHT * cycle_loss + NO_FIXED_POINT_WEIGHT * no_fixed_point_loss + REFLECTOR_WEIGHT * reflector_loss
+    total_loss = ce_loss
     
     total_loss.backward()
     optimizer.step()
     
     if step % LOG_STEP == 0:
-        print(f"step {step}, loss {total_loss.item():.4f}, ce {ce_loss.item():.4f}, cycle {cycle_loss.item():.4f}, no_fixed_point {no_fixed_point_loss.item():.4f}, reflector {reflector_loss.item():.4f}, tau {tau:.4f}")
+        print(f"step {step}, loss {total_loss.item():.4f}, ce {ce_loss.item():.4f}, tau {tau:.4f}")
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 os.makedirs(models_dir, exist_ok=True)

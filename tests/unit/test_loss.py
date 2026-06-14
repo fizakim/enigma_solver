@@ -2,7 +2,8 @@ import sys
 sys.path.append(".")
 import torch
 import torch.nn as nn
-from enigma_net import LossFunction, CrossEntropyLoss, NoFixedPointLoss
+from enigma_net import LossFunction, CrossEntropyLoss
+from enigma_net.unsupervised import NoFixedPointLoss
 
 def test_loss_interface():
     # Verify inheritance and class definitions

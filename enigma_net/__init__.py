@@ -4,7 +4,5 @@ from .sinkhorn import Sinkhorn
 from .loss import LossFunction
 from .supervised.cross_entropy import CrossEntropyLoss
 from .unsupervised.ngram_loss import NgramLoss
-from .cycle_loss import CycleLoss
-from .no_fixed_point_loss import NoFixedPointLoss
-from .reflector_loss import ReflectorLoss
+
 
