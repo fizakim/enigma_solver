@@ -20,7 +20,7 @@ from config.alphabet15 import alphabet15
 from config.alphabet26 import alphabet26
 
 train_config = TrainConfig(
-    enigma_config=alphabet5,
+    enigma_config=alphabet3,
     loss_fn=PermutationLoss(),
     trainable_rotors=None,
     trainable_reflector=True,
@@ -28,14 +28,14 @@ train_config = TrainConfig(
 
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 500
-LOG_STEP = 100
+TOTAL_STEPS = 200
+LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1
 N_TAU_ITERS = TOTAL_STEPS * 0.9
 ITERATIONS = 10
 OPTIMIZER_CLASS = torch.optim.Adam
-N_POSITIONS = 32
+N_POSITIONS = 8
 
 
 learner = EnigmaNet(
@@ -104,4 +104,4 @@ print(f"Saved trained learner weights to '{weights_path}'")
 print("\nRunning compare.py evaluation...")
 compare(weights_path, config=train_config.enigma_config)
 
-visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=False)
+visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=True)
