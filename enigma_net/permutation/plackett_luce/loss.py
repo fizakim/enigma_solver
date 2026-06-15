@@ -4,11 +4,6 @@ from enigma_net.permutation.plackett_luce.core import Permutation
 
 class PlackettLuceLoss(LossFunction):
     def forward(self, scores, target: Permutation):
-        n = scores.shape[0]
-        sigma = target.indices
-        A = scores[:, sigma]
-        suffix_sums = torch.flip(torch.cumsum(torch.flip(A, dims=[1]), dim=1), dims=[1])
-        denom = torch.diagonal(suffix_sums)
-        num = torch.diagonal(A)
-        nll = -torch.log(num + 1e-12).sum() + torch.log(denom + 1e-12).sum()
-        return nll / n
+        log_A = torch.log(scores[:, target.indices] + 1e-15)
+        log_suffix = torch.flip(torch.logcumsumexp(torch.flip(log_A, dims=[1]), dim=1), dims=[1])
+        return (-torch.diagonal(log_A).sum() + torch.diagonal(log_suffix).sum()) / scores.shape[0]

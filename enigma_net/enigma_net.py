@@ -3,7 +3,7 @@ import torch.nn as nn
 from .rotor_layer import RotorLayer
 
 class EnigmaNet(nn.Module):
-    def __init__(self, config, load_target=False, tau=0.1, iterations=10, trainable_rotors=None, trainable_reflector=False):
+    def __init__(self, config, load_target=False, tau=0.1, iterations=10, trainable_rotors=None, trainable_reflector=False, noise_scale=1.0):
         super().__init__()
         self.config = config
         self.n = len(config.alphabet)
@@ -15,7 +15,8 @@ class EnigmaNet(nn.Module):
                 self.n, 
                 target_wiring=torch.from_numpy(config.wiring_to_matrix(r.wiring)).float() if load_target else None,
                 tau=tau,
-                iterations=iterations
+                iterations=iterations,
+                noise_scale=noise_scale
             )
             for r in config.rotors
         ])
@@ -23,7 +24,7 @@ class EnigmaNet(nn.Module):
         if trainable_reflector and not load_target:
             self.reflector_logits = nn.Parameter(torch.randn(self.n, self.n))
             from .sinkhorn import Sinkhorn
-            self.reflector_sinkhorn = Sinkhorn(tau, iterations)
+            self.reflector_sinkhorn = Sinkhorn(tau, iterations, noise_scale=noise_scale)
         else:
             self.reflector_logits = None
             self.register_buffer("_reflector", torch.from_numpy(config.wiring_to_matrix(config.reflector)).float())
@@ -71,6 +72,25 @@ class EnigmaNet(nn.Module):
         for r, pos in zip(self.rotors, self.positions):
             v = r.backward_pass(v, pos)
         return v
+
+    def forward_matrix(self, positions, wirings=None, reflector=None):
+        self.reset(positions)
+        self.step()
+        if wirings is None:
+            wirings = [r.get_wiring() for r in self.rotors]
+        if reflector is None:
+            reflector = self.reflector
+
+        M = torch.eye(self.n)
+        for w, pos in zip(reversed(wirings), reversed(self.positions)):
+            M = torch.roll(w, shifts=(-pos, -pos), dims=(0, 1)) @ M
+
+        M = reflector @ M
+
+        for w, pos in zip(wirings, self.positions):
+            M = torch.roll(w.T, shifts=(-pos, -pos), dims=(0, 1)) @ M
+
+        return M
 
     def reset(self, positions=None):
         if positions is None:

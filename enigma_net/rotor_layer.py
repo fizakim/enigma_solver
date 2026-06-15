@@ -3,7 +3,7 @@ import torch.nn as nn
 from .sinkhorn import Sinkhorn
 
 class RotorLayer(nn.Module):
-    def __init__(self, size, target_wiring=None, tau=0.1, iterations=10):
+    def __init__(self, size, target_wiring=None, tau=0.1, iterations=10, noise_scale=1.0):
         super().__init__()
         if target_wiring is not None:
             self.register_buffer("wiring", target_wiring)
@@ -11,7 +11,7 @@ class RotorLayer(nn.Module):
             self.sinkhorn = None
         else:
             self.logits = nn.Parameter(torch.randn(size, size))
-            self.sinkhorn = Sinkhorn(tau, iterations)
+            self.sinkhorn = Sinkhorn(tau, iterations, noise_scale=noise_scale)
 
     def get_wiring(self):
         if self.logits is not None:

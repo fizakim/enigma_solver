@@ -3,6 +3,7 @@ import os
 import random
 from datetime import datetime
 import torch
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
@@ -15,22 +16,27 @@ from enigma_net.permutation.plackett_luce.loss import PlackettLuceLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
+from config.alphabet10 import alphabet10
+from config.alphabet15 import alphabet15
+from config.alphabet26 import alphabet26
 
 train_config = TrainConfig(
-    enigma_config=alphabet3,
+    enigma_config=alphabet5,
     loss_fn=PlackettLuceLoss(),
     trainable_rotors=None,
     trainable_reflector=True,
 )
 
-LEARNING_RATE = 0.1
-TOTAL_STEPS = 100
+LEARNING_RATE = 0.01
+TOTAL_STEPS = 200
 LOG_STEP = 10
-TAU_START = 2.0
-TAU_END = 0.1
+TAU_START = 1.0
+TAU_END = 0.05
 N_TAU_ITERS = TOTAL_STEPS * 0.9
-ITERATIONS = 10
-N_POSITIONS = 64
+ITERATIONS = 20
+NOISE_SCALE = 0.1
+
+N_POSITIONS = 8
 
 learner = EnigmaNet(
     train_config.enigma_config,
@@ -39,22 +45,26 @@ learner = EnigmaNet(
     iterations=ITERATIONS,
     trainable_rotors=train_config.trainable_rotors,
     trainable_reflector=train_config.trainable_reflector,
+    noise_scale=NOISE_SCALE,
 )
 target = train_config.enigma_config.build()
+
+n_alphabet = len(train_config.enigma_config.alphabet)
+n_rotors = len(train_config.enigma_config.rotors)
 
 optimizer = torch.optim.Adam(learner.parameters(), lr=LEARNING_RATE)
 loss_fn = train_config.loss_fn
 
-print("Training (Plackett-Luce permutation)...")
-n_alphabet = len(train_config.enigma_config.alphabet)
-n_rotors = len(train_config.enigma_config.rotors)
+print("Training (Plackett-Luce)...")
+
+learner.train()
 
 for step in range(TOTAL_STEPS):
     tau = TAU_START * (TAU_END / TAU_START) ** (step / N_TAU_ITERS) if step < N_TAU_ITERS else TAU_END
     learner.set_tau(tau)
 
     optimizer.zero_grad()
-    total_loss = 0.0
+    total_loss = torch.tensor(0.0)
 
     for _ in range(N_POSITIONS):
         positions = [random.randint(0, n_alphabet - 1) for _ in range(n_rotors)]
@@ -64,18 +74,19 @@ for step in range(TOTAL_STEPS):
         for c in train_config.enigma_config.alphabet:
             target.reset(positions)
             learner.reset(positions)
-            
+
             input_vec = torch.zeros(n_alphabet)
             input_vec[learner.char_to_idx[c]] = 1.0
 
             target_char = target.encrypt_char(c)
             target_labels.append(learner.char_to_idx[target_char])
 
-            outputs.append(learner(input_vec))
+            learner_out = learner(input_vec)
+            outputs.append(learner_out)
 
         predictions = torch.stack(outputs)
-        target_perm = Permutation(target_labels)
-        total_loss += loss_fn(predictions, target_perm)
+        targets = torch.tensor(target_labels, dtype=torch.long)
+        total_loss = total_loss + loss_fn(predictions, Permutation(targets))
 
     total_loss = total_loss / N_POSITIONS
     total_loss.backward()
@@ -83,6 +94,8 @@ for step in range(TOTAL_STEPS):
 
     if step % LOG_STEP == 0:
         print(f"step {step}, loss {total_loss.item():.4f}, tau {tau:.4f}")
+
+learner.eval()
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
@@ -93,4 +106,5 @@ print(f"Saved trained learner weights to '{weights_path}'")
 
 print("\nRunning compare.py evaluation...")
 compare(weights_path, config=train_config.enigma_config)
-visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=True)
+visualise(learner, train_config.enigma_config.build(), show_active=False, show_numbers=False)
+
