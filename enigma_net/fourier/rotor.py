@@ -43,7 +43,8 @@ class Rotor(nn.Module):
         perm_values = self.get_permutation_values(position)
         targets = torch.arange(self.n, dtype=torch.float32, device=perm_values.device)
         diff = targets.unsqueeze(1) - perm_values.unsqueeze(0)
-        scores = torch.cos(2.0 * math.pi * diff / self.n) / self.tau
+        wrapped = diff - self.n * torch.round(diff / self.n)
+        scores = -wrapped.pow(2) / (2.0 * self.tau ** 2)
         return torch.softmax(scores, dim=0)
 
     def forward(self, v, position):

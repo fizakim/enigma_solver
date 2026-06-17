@@ -20,7 +20,7 @@ from config.alphabet10 import alphabet10
 
 
 train_config = TrainConfig(
-    enigma_config=alphabet10,
+    enigma_config=alphabet5,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
