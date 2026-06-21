@@ -7,12 +7,11 @@ class RotorConfig:
         self.notch = notch
 
 class EnigmaConfig:
-    def __init__(self, alphabet, rotors, reflector, plugboard_pairs=None, language=None):
+    def __init__(self, alphabet, rotors, reflector, plugboard_pairs=None):
         self.alphabet = alphabet
         self.rotors = rotors
         self.reflector = reflector
         self.plugboard_pairs = plugboard_pairs or []
-        self.language = language
 
     def wiring_to_matrix(self, wiring):
         n = len(self.alphabet)

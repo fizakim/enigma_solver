@@ -4,6 +4,5 @@ from .sinkhorn import Sinkhorn
 from .loss import LossFunction
 from .supervised.cross_entropy import CrossEntropyLoss
 from .permutation.basic.permutation_loss import PermutationLoss
-from .unsupervised.ngram_loss import NgramLoss
 
 

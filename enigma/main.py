@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config.alphabet3 import alphabet3
 
 positions = [0, 0, 0]
-plaintext = alphabet3.language.generate_sentence(3) if alphabet3.language else "ABC"
+import random
+plaintext = "".join(random.choice(alphabet3.alphabet) for _ in range(3))
 print("Plaintext:  ", plaintext)
 
 machine_enc = alphabet3.build(positions)

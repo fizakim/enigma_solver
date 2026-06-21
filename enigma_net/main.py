@@ -9,7 +9,8 @@ from visualiser import visualise
 net = EnigmaNet(alphabet3, load_target=False)
 target_sim = alphabet3.build()
 
-plaintext = alphabet3.language.generate_sentence(3) if alphabet3.language else "ABC"
+import random
+plaintext = "".join(random.choice(alphabet3.alphabet) for _ in range(3))
 
 print(f"Random net:  '{plaintext}' -> '{net.encrypt_string(plaintext)}'")
 print(f"Target sim:  '{plaintext}' -> '{target_sim.encrypt(plaintext)}'")
