@@ -25,9 +25,17 @@ def compare(weights_path=None, config=alphabet3):
         
     print(f"Loading weights from {weights_path}")
     state_dict = torch.load(weights_path, map_location="cpu")
-    trainable_reflector = any("reflector_layer.logits" in k for k in state_dict.keys())
+    # trainable reflector: old DFT net uses 'reflector_layer.logits';
+    # new QNet uses 'R_real' / 'R_imag' as nn.Parameters when trainable.
+    trainable_reflector = (
+        any("reflector_layer.logits" in k for k in state_dict.keys())
+        or any(k in ("R_real", "R_imag") for k in state_dict.keys())
+    )
     
-    is_q_net = not any(k.startswith("rotors.") for k in state_dict.keys())
+    # Detect model type:
+    #   New QNet   → has 'rotors.0.Q_real' (per-rotor complex Fourier matrix)
+    #   DFT net    → has 'rotors.0.logits'  (spectral logits + phase shift)
+    is_q_net = any(k == "rotors.0.Q_real" for k in state_dict.keys())
     if is_q_net:
         from enigma_net.fourier.q_net.net import QNet
         learner = QNet(config, trainable_reflector=trainable_reflector)
