@@ -23,7 +23,7 @@ from config.alphabet26 import alphabet26
 LOAD_TARGET = False
 
 train_config = TrainConfig(
-    enigma_config=alphabet26,
+    enigma_config=alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
