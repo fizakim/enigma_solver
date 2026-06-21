@@ -1,9 +1,10 @@
 from datasets import load_dataset
 import re
+import os
 
 ROWS = 10_000
 ROW_LENGTH = 100
-OUTPUT = "data/fineweb.txt"
+OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fineweb.txt")
 
 dataset = load_dataset("HuggingFaceFW/fineweb", name="sample-10BT", split="train", streaming=True)
 
