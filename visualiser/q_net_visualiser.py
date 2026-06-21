@@ -41,10 +41,15 @@ def visualise_q_net(net, target_sim, position=None, show_numbers=True):
             lrn_Q = net_rotor.get_Q().detach().cpu().numpy()
         lrn_Q_mag = np.abs(lrn_Q)
 
+        argmax_spatial = np.zeros_like(lrn_spatial)
+        argmax_idx = np.argmax(lrn_spatial, axis=0)
+        argmax_spatial[argmax_idx, np.arange(n)] = 1.0
+
         rotor_data.append({
             "label": f"Rotor {i}  (pos={pos})",
             "tgt_spatial": tgt_spatial,
             "lrn_spatial": lrn_spatial,
+            "argmax_spatial": argmax_spatial,
             "tgt_Q_mag": tgt_Q_mag,
             "lrn_Q_mag": lrn_Q_mag,
         })
@@ -58,14 +63,18 @@ def visualise_q_net(net, target_sim, position=None, show_numbers=True):
         lrn_ref_fourier = net.reflector_fourier.detach().cpu().numpy()
     lrn_ref_mag = np.abs(lrn_ref_fourier)
 
+    argmax_ref_spatial = np.zeros_like(lrn_ref_spatial)
+    argmax_ref_idx = np.argmax(lrn_ref_spatial, axis=0)
+    argmax_ref_spatial[argmax_ref_idx, np.arange(n)] = 1.0
+
     n_rows = n_rotors + 1
-    n_cols = 4
+    n_cols = 5
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows))
     if n_rows == 1:
         axes = axes[np.newaxis, :]
 
     for col_idx, title in enumerate(
-        ["Target (Spatial)", "Learned (Spatial)", "Target Q (|Fourier|)", "Learned Q (|Fourier|)"]
+        ["Target (Spatial)", "Learned (Spatial)", "Learned (Argmax)", "Target Q (|Fourier|)", "Learned Q (|Fourier|)"]
     ):
         axes[0, col_idx].set_title(title, fontsize=11, weight="bold", pad=8)
 
@@ -98,7 +107,7 @@ def visualise_q_net(net, target_sim, position=None, show_numbers=True):
         ax.grid(which="major", visible=False)
 
     for row_idx, rd in enumerate(rotor_data):
-        ax0, ax1, ax2, ax3 = axes[row_idx]
+        ax0, ax1, ax2, ax3, ax4 = axes[row_idx]
 
         ax0.imshow(rd["tgt_spatial"], cmap="Blues", vmin=0, vmax=1)
         std_ticks(ax0)
@@ -109,22 +118,26 @@ def visualise_q_net(net, target_sim, position=None, show_numbers=True):
         std_ticks(ax1)
         fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
-        ax2.imshow(rd["tgt_Q_mag"], cmap="Purples", vmin=0, vmax=1)
-        fourier_ticks(ax2)
+        ax2.imshow(rd["argmax_spatial"], cmap="Blues", vmin=0, vmax=1)
+        std_ticks(ax2)
+
+        ax3.imshow(rd["tgt_Q_mag"], cmap="Purples", vmin=0, vmax=1)
+        fourier_ticks(ax3)
 
         max_q = max(1.0, float(np.max(rd["lrn_Q_mag"])))
-        im3 = ax3.imshow(rd["lrn_Q_mag"], cmap="Purples", vmin=0, vmax=max_q)
-        fourier_ticks(ax3)
-        fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+        im4 = ax4.imshow(rd["lrn_Q_mag"], cmap="Purples", vmin=0, vmax=max_q)
+        fourier_ticks(ax4)
+        fig.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04)
 
         if show_numbers:
             draw_numbers(ax0, rd["tgt_spatial"], fmt="{:.0f}", threshold=0.5)
             draw_numbers(ax1, rd["lrn_spatial"], threshold=max_sp * 0.5)
-            draw_numbers(ax2, rd["tgt_Q_mag"], threshold=0.5)
-            draw_numbers(ax3, rd["lrn_Q_mag"], threshold=max_q * 0.5)
+            draw_numbers(ax2, rd["argmax_spatial"], fmt="{:.0f}", threshold=0.5)
+            draw_numbers(ax3, rd["tgt_Q_mag"], threshold=0.5)
+            draw_numbers(ax4, rd["lrn_Q_mag"], threshold=max_q * 0.5)
 
     ref_row = n_rotors
-    ax0, ax1, ax2, ax3 = axes[ref_row]
+    ax0, ax1, ax2, ax3, ax4 = axes[ref_row]
 
     ax0.imshow(tgt_ref_spatial, cmap="Blues", vmin=0, vmax=1)
     std_ticks(ax0)
@@ -135,19 +148,23 @@ def visualise_q_net(net, target_sim, position=None, show_numbers=True):
     std_ticks(ax1)
     fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
-    ax2.imshow(tgt_ref_mag, cmap="Purples", vmin=0, vmax=1)
-    fourier_ticks(ax2)
+    ax2.imshow(argmax_ref_spatial, cmap="Blues", vmin=0, vmax=1)
+    std_ticks(ax2)
+
+    ax3.imshow(tgt_ref_mag, cmap="Purples", vmin=0, vmax=1)
+    fourier_ticks(ax3)
 
     max_q = max(1.0, float(np.max(lrn_ref_mag)))
-    im3 = ax3.imshow(lrn_ref_mag, cmap="Purples", vmin=0, vmax=max_q)
-    fourier_ticks(ax3)
-    fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+    im4 = ax4.imshow(lrn_ref_mag, cmap="Purples", vmin=0, vmax=max_q)
+    fourier_ticks(ax4)
+    fig.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04)
 
     if show_numbers:
         draw_numbers(ax0, tgt_ref_spatial, fmt="{:.0f}", threshold=0.5)
         draw_numbers(ax1, lrn_ref_spatial, threshold=max_sp * 0.5)
-        draw_numbers(ax2, tgt_ref_mag, threshold=0.5)
-        draw_numbers(ax3, lrn_ref_mag, threshold=max_q * 0.5)
+        draw_numbers(ax2, argmax_ref_spatial, fmt="{:.0f}", threshold=0.5)
+        draw_numbers(ax3, tgt_ref_mag, threshold=0.5)
+        draw_numbers(ax4, lrn_ref_mag, threshold=max_q * 0.5)
 
     plt.suptitle("Q-Net — Fourier-domain rotor analysis", fontsize=13, y=1.01)
     plt.tight_layout()

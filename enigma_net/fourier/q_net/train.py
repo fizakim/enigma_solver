@@ -1,3 +1,5 @@
+from config.alphabet26 import alphabet26
+from config.alphabet15 import alphabet15
 import sys
 import os
 import random
@@ -15,11 +17,13 @@ from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5#
 from config.alphabet10 import alphabet10
+from config.alphabet15 import alphabet15
+from config.alphabet26 import alphabet26
 
 LOAD_TARGET = False
 
 train_config = TrainConfig(
-    enigma_config=alphabet10,
+    enigma_config=alphabet26,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
