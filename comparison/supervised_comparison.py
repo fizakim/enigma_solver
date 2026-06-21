@@ -1,20 +1,21 @@
 import sys
 import os
-import glob
 import itertools
 import torch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Ensure the root of the repository is in the python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from config.alphabet3 import alphabet3
 from enigma_net.enigma_net import EnigmaNet
+from comparison.utils import find_latest_weights, compute_target_matrix
 
 def compare(weights_path=None, config=alphabet3):
     if not weights_path:
-        models_dir = os.path.join(os.path.dirname(__file__), "models")
-        weights_path = max(glob.glob(os.path.join(models_dir, "learner_*.pth")))
+        weights_path = find_latest_weights(["learner_*.pth"])
         
-    state_dict = torch.load(weights_path)
+    print(f"Loading weights from {weights_path}")
+    state_dict = torch.load(weights_path, map_location="cpu")
     trainable_reflector = "reflector_logits" in state_dict
     learner = EnigmaNet(config, trainable_reflector=trainable_reflector)
     learner.load_state_dict(state_dict)
@@ -29,13 +30,6 @@ def compare(weights_path=None, config=alphabet3):
     learner_reflector = learner.reflector
     learner_wiring = [r.get_wiring() for r in learner.rotors]
     
-    def compute_matrix(wirings, reflector, positions, plugboard=None):
-        M_fwd = torch.eye(reflector.shape[0])
-        for W, p in zip(wirings, positions):
-            M_fwd = M_fwd @ torch.roll(W, shifts=(-p, -p), dims=(0, 1))
-        E = M_fwd.T @ reflector @ M_fwd
-        return plugboard @ E @ plugboard if plugboard is not None else E
-
     mismatches = 0
     frob_diff = 0.0
     all_positions = itertools.product(range(len(config.alphabet)), repeat=len(config.rotors))
@@ -49,15 +43,14 @@ def compare(weights_path=None, config=alphabet3):
             if not r.step():
                 break
         
-        E_learner = compute_matrix(learner_wiring, learner_reflector, [int(p) for p in learner.positions])
-        E_target = compute_matrix(target_wiring, target_reflector, [int(r.position) for r in target.rotors], target_plugboard)
+        E_learner = compute_target_matrix(learner_wiring, learner_reflector, [int(p) for p in learner.positions])
+        E_target = compute_target_matrix(target_wiring, target_reflector, [int(r.position) for r in target.rotors], target_plugboard)
         
         mismatches += torch.sum(torch.argmax(E_learner, dim=0) != torch.argmax(E_target, dim=0)).item()
         frob_diff += torch.norm(E_learner - E_target).item()
             
     print("argmax models are identical." if mismatches == 0 else f"Failure: Found {mismatches} mismatches.")
     print(f"Frobenius norm diff: {frob_diff:.4f}")
-
 
 if __name__ == "__main__":
     compare()

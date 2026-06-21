@@ -7,7 +7,7 @@ import torch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from enigma_net.fourier.q_net.net import QNet
-from enigma_net.fourier.compare import compare
+from comparison.fourier_comparison import compare
 
 from enigma_net import CrossEntropyLoss
 from enigma_net.train_config import TrainConfig
@@ -18,14 +18,14 @@ from config.alphabet10 import alphabet10
 LOAD_TARGET = False
 
 train_config = TrainConfig(
-    enigma_config=alphabet5,
+    enigma_config=alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
 )
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 1000
+TOTAL_STEPS = 500
 LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1

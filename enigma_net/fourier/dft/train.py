@@ -7,7 +7,7 @@ import torch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from enigma_net.fourier.dft.net import EnigmaNet
-from enigma_net.fourier.compare import compare
+from comparison.fourier_comparison import compare
 from visualiser import visualise_fourier
 
 from enigma_net import CrossEntropyLoss

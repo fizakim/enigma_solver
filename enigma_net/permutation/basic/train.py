@@ -8,7 +8,7 @@ import torch.nn as nn
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from enigma_net.enigma_net import EnigmaNet
-from enigma_net.compare import compare
+from comparison.supervised_comparison import compare
 from visualiser import visualise
 
 from enigma_net.permutation.basic.permutation_loss import PermutationLoss
