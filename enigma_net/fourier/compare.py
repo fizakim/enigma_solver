@@ -7,18 +7,29 @@ import torch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from config.alphabet3 import alphabet3
-from enigma_net.fourier.net import EnigmaNet
 
 def compare(weights_path=None, config=alphabet3):
     if not weights_path:
         models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+        dft_paths = glob.glob(os.path.join(models_dir, "dft_learner_*.pth"))
+        q_net_paths = glob.glob(os.path.join(models_dir, "q_net_learner_*.pth"))
         fourier_paths = glob.glob(os.path.join(models_dir, "fourier_learner_*.pth"))
-        weights_path = max(fourier_paths) if fourier_paths else max(glob.glob(os.path.join(models_dir, "learner_*.pth")))
+        q_paths = glob.glob(os.path.join(models_dir, "q_learner_*.pth"))
+        all_paths = dft_paths + q_net_paths + fourier_paths + q_paths
+        weights_path = max(all_paths) if all_paths else max(glob.glob(os.path.join(models_dir, "learner_*.pth")))
         
     print(f"Loading weights from {weights_path}")
     state_dict = torch.load(weights_path)
     trainable_reflector = any("reflector_layer.logits" in k for k in state_dict.keys())
-    learner = EnigmaNet(config, trainable_reflector=trainable_reflector)
+    
+    is_q_net = not any(k.startswith("rotors.") for k in state_dict.keys())
+    if is_q_net:
+        from enigma_net.fourier.q_net.net import QNet
+        learner = QNet(config, trainable_reflector=trainable_reflector)
+    else:
+        from enigma_net.fourier.dft.net import EnigmaNet
+        learner = EnigmaNet(config, trainable_reflector=trainable_reflector)
+        
     learner.load_state_dict(state_dict)
     learner.eval()
     

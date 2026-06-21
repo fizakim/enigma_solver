@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .rotor import Rotor
-from .reflector import Reflector
+from ..reflector import Reflector
 
 class EnigmaNet(nn.Module):
     def __init__(self, config, load_target=False, tau=0.1, iterations=10, trainable_rotors=None, trainable_reflector=False, noise_scale=1.0, mapping_type="softmax"):

@@ -1,13 +1,12 @@
-from config.alphabet10 import alphabet10
 import sys
 import os
 import random
 from datetime import datetime
 import torch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from enigma_net.fourier.net import EnigmaNet
+from enigma_net.fourier.dft.net import EnigmaNet
 from enigma_net.fourier.compare import compare
 from visualiser import visualise_fourier
 
@@ -40,7 +39,7 @@ learner = EnigmaNet(
     tau=TAU_START, 
     trainable_rotors=train_config.trainable_rotors,
     trainable_reflector=train_config.trainable_reflector,
-    mapping_type="softmax"
+    mapping_type="linear"
 )
 target = train_config.enigma_config.build()
 optimizer = torch.optim.Adam(learner.parameters(), lr=LEARNING_RATE)
@@ -80,10 +79,10 @@ for step in range(TOTAL_STEPS):
     if step % LOG_STEP == 0:
         print(f"step {step}, loss {ce_loss.item():.4f}, tau {tau:.4f}")
 
-models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-weights_path = os.path.join(models_dir, f"fourier_learner_{timestamp}.pth")
+weights_path = os.path.join(models_dir, f"dft_learner_{timestamp}.pth")
 torch.save(learner.state_dict(), weights_path)
 print(f"Saved trained learner weights to '{weights_path}'")
 

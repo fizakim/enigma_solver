@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from .mappings import get_mapping
+from ..mappings import get_mapping
 
 def get_logits(n, perm):
     spectrum = torch.fft.rfft(perm)
