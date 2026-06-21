@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+from .mappings import get_mapping
 
 def get_logits(n, perm):
     spectrum = torch.fft.rfft(perm)
@@ -8,11 +9,12 @@ def get_logits(n, perm):
     return torch.cat([spectral.real, spectral.imag if n % 2 != 0 else spectral.imag[:-1]])
 
 class Rotor(nn.Module):
-    def __init__(self, size, target_wiring=None, tau=0.1, iterations=10, noise_scale=1.0):
+    def __init__(self, size, target_wiring=None, tau=0.1, iterations=10, noise_scale=1.0, mapping_type="softmax"):
         super().__init__()
         self.n = size
         self.tau = tau
         self.dc = size * (size - 1) / 2.0
+        self.mapping = get_mapping(mapping_type, size)
 
         if target_wiring is not None:
             perm = target_wiring.argmax(dim=0).float()
@@ -41,11 +43,7 @@ class Rotor(nn.Module):
 
     def get_wiring(self, position=0):
         perm_values = self.get_permutation_values(position)
-        targets = torch.arange(self.n, dtype=torch.float32, device=perm_values.device)
-        diff = targets.unsqueeze(1) - perm_values.unsqueeze(0)
-        wrapped = diff - self.n * torch.round(diff / self.n)
-        scores = -wrapped.pow(2) / (2.0 * self.tau ** 2)
-        return torch.softmax(scores, dim=0)
+        return self.mapping(perm_values, self.tau)
 
     def forward(self, v, position):
         return self.get_wiring(position) @ v

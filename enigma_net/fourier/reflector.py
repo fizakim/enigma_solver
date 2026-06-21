@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+from .mappings import get_mapping
 
 def get_logits(n, perm):
     spectrum = torch.fft.rfft(perm)
@@ -8,11 +9,12 @@ def get_logits(n, perm):
     return torch.cat([spectral.real, spectral.imag if n % 2 != 0 else spectral.imag[:-1]])
 
 class Reflector(nn.Module):
-    def __init__(self, size, target_reflector=None, tau=0.1):
+    def __init__(self, size, target_reflector=None, tau=0.1, mapping_type="softmax"):
         super().__init__()
         self.n = size
         self.tau = tau
         self.dc = size * (size - 1) / 2.0
+        self.mapping = get_mapping(mapping_type, size)
 
         if target_reflector is not None:
             perm = target_reflector.argmax(dim=0).float()
@@ -37,11 +39,7 @@ class Reflector(nn.Module):
         rfft_spectrum = torch.cat([dc_tensor, spectral])
         perm_values = torch.fft.irfft(rfft_spectrum, n=self.n)
         
-        targets = torch.arange(self.n, dtype=torch.float32, device=perm_values.device)
-        diff = targets.unsqueeze(1) - perm_values.unsqueeze(0)
-        wrapped = diff - self.n * torch.round(diff / self.n)
-        scores = -wrapped.pow(2) / (2.0 * self.tau ** 2)
-        P = torch.softmax(scores, dim=0)
+        P = self.mapping(perm_values, self.tau)
         return (P + P.T) / 2.0
 
     def forward(self, v):

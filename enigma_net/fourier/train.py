@@ -20,14 +20,14 @@ from config.alphabet10 import alphabet10
 
 
 train_config = TrainConfig(
-    enigma_config=alphabet5,
+    enigma_config=alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
 )
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 1000
+TOTAL_STEPS = 500
 LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1
@@ -39,7 +39,8 @@ learner = EnigmaNet(
     load_target=False, 
     tau=TAU_START, 
     trainable_rotors=train_config.trainable_rotors,
-    trainable_reflector=train_config.trainable_reflector
+    trainable_reflector=train_config.trainable_reflector,
+    mapping_type="softmax"
 )
 target = train_config.enigma_config.build()
 optimizer = torch.optim.Adam(learner.parameters(), lr=LEARNING_RATE)

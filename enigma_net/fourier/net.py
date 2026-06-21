@@ -4,7 +4,7 @@ from .rotor import Rotor
 from .reflector import Reflector
 
 class EnigmaNet(nn.Module):
-    def __init__(self, config, load_target=False, tau=0.1, iterations=10, trainable_rotors=None, trainable_reflector=False, noise_scale=1.0):
+    def __init__(self, config, load_target=False, tau=0.1, iterations=10, trainable_rotors=None, trainable_reflector=False, noise_scale=1.0, mapping_type="softmax"):
         super().__init__()
         self.config = config
         self.n = len(config.alphabet)
@@ -16,18 +16,20 @@ class EnigmaNet(nn.Module):
             Rotor(
                 self.n,
                 target_wiring=torch.from_numpy(config.wiring_to_matrix(r.wiring)).float() if load_target else None,
-                tau=tau
+                tau=tau,
+                mapping_type=mapping_type
             )
             for r in config.rotors
         ])
 
         if trainable_reflector and not load_target:
-            self.reflector_layer = Reflector(self.n, tau=tau)
+            self.reflector_layer = Reflector(self.n, tau=tau, mapping_type=mapping_type)
         else:
             self.reflector_layer = Reflector(
                 self.n,
                 target_reflector=torch.from_numpy(config.wiring_to_matrix(config.reflector)).float(),
-                tau=tau
+                tau=tau,
+                mapping_type=mapping_type
             )
 
         self.notches = [config.parse_position(r.notch) for r in config.rotors]
