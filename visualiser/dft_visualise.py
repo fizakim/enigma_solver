@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
-def visualise_fourier(net, target_sim, show_active=True, show_numbers=True):
+def visualise_dft(net, target_sim, show_active=True, show_numbers=True):
     alphabet = net.config.alphabet
     n = len(alphabet)
     K = len(net.rotors)

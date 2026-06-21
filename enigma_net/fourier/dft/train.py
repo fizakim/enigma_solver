@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from enigma_net.fourier.dft.net import EnigmaNet
 from comparison.fourier_comparison import compare
-from visualiser import visualise_fourier
+from visualiser import visualise_dft
 
 from enigma_net import CrossEntropyLoss
 from enigma_net.train_config import TrainConfig
@@ -89,4 +89,4 @@ print(f"Saved trained learner weights to '{weights_path}'")
 print("\nRunning compare.py evaluation...")
 compare(weights_path, config=train_config.enigma_config)
 
-visualise_fourier(learner, train_config.enigma_config.build(), show_active=False, show_numbers=False)
+visualise_dft(learner, train_config.enigma_config.build(), show_active=False, show_numbers=False)

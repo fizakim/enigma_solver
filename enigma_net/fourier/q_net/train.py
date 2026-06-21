@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from enigma_net.fourier.q_net.net import QNet
 from comparison.fourier_comparison import compare
+from visualiser import visualise_q_net
 
 from enigma_net import CrossEntropyLoss
 from enigma_net.train_config import TrainConfig
@@ -25,7 +26,7 @@ train_config = TrainConfig(
 )
 
 LEARNING_RATE = 0.1
-TOTAL_STEPS = 500
+TOTAL_STEPS = 200
 LOG_STEP = 10
 TAU_START = 1.0
 TAU_END = 0.1
@@ -93,3 +94,5 @@ else:
     
     print("\nRunning compare.py evaluation...")
     compare(weights_path, config=train_config.enigma_config)
+    
+    visualise_q_net(learner, train_config.enigma_config.build(), show_numbers=False)
