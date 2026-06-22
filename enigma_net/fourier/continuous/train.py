@@ -8,7 +8,7 @@ import torch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from enigma_net.fourier.continuous.net import ContinuousQNet
-from enigma_net import CrossEntropyLoss
+from enigma_net import CrossEntropyLoss, NgramLoss, load_ngram_logprobs
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
@@ -21,8 +21,26 @@ from visualiser.continuous_visualise import visualise_continuous
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+# ---------------------------------------------------------------------------
+# Loss mode: "ce" (supervised cross-entropy, known plaintext) or
+#            "ngram" (unsupervised; only ciphertext + an English trigram prior).
+#
+# In "ngram" mode the data flow is reversed relative to "ce": the plaintext is
+# *real English* sampled from the corpus, the target Enigma encrypts it, and the
+# NET IS FED THE CIPHERTEXT. The net's output is scored by how English-like it is
+# (trigram log-prob). The known plaintext is used only as a monitor-only accuracy
+# readout, never for candidate selection or early-stopping.
+# ---------------------------------------------------------------------------
+LOSS_MODE = "ngram"   # "ce" or "ngram"
+NGRAM = LOSS_MODE == "ngram"
+TAU = 0.5             # softmax temperature for the n-gram soft decoding (fixed)
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+NGRAM_PATH = os.path.join(_ROOT, "language", "ngram", "3grams.pth")
+CORPUS_PATH = os.path.join(_ROOT, "language", "fineweb", "fineweb.txt")
+
 train_config = TrainConfig(
-    enigma_config=alphabet3,
+    enigma_config=alphabet26 if NGRAM else alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
@@ -45,6 +63,12 @@ n = len(config.alphabet)
 char_to_idx = {c: i for i, c in enumerate(config.alphabet)}
 num_rotors = len(config.rotors)
 
+# Build the loss function. In ngram mode it owns the trigram table (on device).
+if NGRAM:
+    loss_fn = NgramLoss(load_ngram_logprobs(NGRAM_PATH, n, device), tau=TAU).to(device)
+else:
+    loss_fn = train_config.loss_fn
+
 true_positions = [random.randint(0, n - 1) for _ in range(num_rotors)]
 print(f"True positions of the target Enigma: {true_positions}")
 
@@ -52,10 +76,43 @@ target_enigma = config.build(true_positions)
 all_positions = list(itertools.product(range(n), repeat=num_rotors))
 C_init = len(all_positions)
 print(f"Total candidate starting positions (basins): {C_init}")
-
+print(f"Loss mode: {LOSS_MODE}")
 print(f"Total training steps: {TOTAL_STEPS}")
-
 print(f"Training sequence length: {LEN_STRING}")
+
+# English corpus sampler (ngram mode only): the plaintext must be real English so
+# that a correct decryption scores high under the trigram prior.
+if NGRAM:
+    with open(CORPUS_PATH, "r", encoding="utf-8") as f:
+        corpus = "".join(ch for ch in f.read() if ch in char_to_idx)
+    if len(corpus) < 2 * LEN_STRING:
+        raise RuntimeError(f"Corpus too small ({len(corpus)} chars) for LEN_STRING={LEN_STRING}.")
+
+    def sample_english(length):
+        start = random.randint(0, len(corpus) - length - 1)
+        return corpus[start:start + length]
+
+
+def make_data(length):
+    """Return (input_indices, monitor_target_tensor) for one sequence.
+
+    ce:    net is fed plaintext; monitor target is the ciphertext (the net learns
+           to mimic the Enigma).
+    ngram: net is fed ciphertext of real English; monitor target is the English
+           plaintext (the net learns to decrypt). The loss ignores the target.
+    """
+    if NGRAM:
+        plaintext = sample_english(length)
+        target_enigma.reset(true_positions)
+        input_indices = [char_to_idx[target_enigma.encrypt_char(c)] for c in plaintext]
+        monitor = [char_to_idx[c] for c in plaintext]
+    else:
+        plaintext = "".join(random.choice(config.alphabet) for _ in range(length))
+        input_indices = [char_to_idx[c] for c in plaintext]
+        target_enigma.reset(true_positions)
+        monitor = [char_to_idx[target_enigma.encrypt_char(c)] for c in plaintext]
+    return input_indices, torch.tensor(monitor, dtype=torch.long, device=device)
+
 
 net = ContinuousQNet(config, initial_positions=all_positions).to(device)
 
@@ -68,46 +125,73 @@ active_original_positions = list(all_positions)
 step_losses = []
 val_losses_history = []
 
-val_plaintext = "".join(random.choice(config.alphabet) for _ in range(VAL_LEN))
-val_input_indices = [char_to_idx[c] for c in val_plaintext]
-target_enigma.reset(true_positions)
-val_target_indices = [char_to_idx[target_enigma.encrypt_char(c)] for c in val_plaintext]
-val_targets_tensor = torch.tensor(val_target_indices, dtype=torch.long, device=device)
+# Fixed validation sequence. val_input_indices is what the net is fed;
+# val_targets_tensor is the monitor target (plaintext in ngram mode, ciphertext in ce).
+val_input_indices, val_targets_tensor = make_data(VAL_LEN)
 
-def evaluate_validation(net_model, val_in_idx, val_targets_t, batch_c=BATCH_C):
+
+def evaluate_validation(net_model, val_in_idx, val_targets_t, loss_fn, batch_c=BATCH_C):
+    """Returns (val_scores, val_ce, val_ngram).
+
+    val_scores: per-candidate output-vs-monitor accuracy (always; monitor-only).
+    val_ce:     per-candidate supervised cross-entropy against the monitor target.
+    val_ngram:  per-candidate unsupervised n-gram loss, or None in ce mode.
+    """
     C = net_model.num_candidates
     T = len(val_in_idx)
-    all_logits = []
+    is_ngram = getattr(loss_fn, "requires_full_sequence", False)
+    val_scores = torch.empty(C, device=val_targets_t.device)
+    val_ce = torch.empty(C, device=val_targets_t.device)
+    val_ngram = torch.empty(C, device=val_targets_t.device) if is_ngram else None
+
     with torch.no_grad():
         for start in range(0, C, batch_c):
             c_indices = torch.arange(start, min(start + batch_c, C), device=val_targets_t.device)
-            logits_b = net_model.encrypt_sequence_slice(val_in_idx, c_indices)  # [T, B, n]
-            all_logits.append(logits_b.transpose(0, 1))                         # [B, T, n]
-    val_logits = torch.cat(all_logits, dim=0)  # [C, T, n]
+            logits_btn = net_model.encrypt_sequence_slice(val_in_idx, c_indices).transpose(0, 1)  # [B, T, n]
+            B = logits_btn.shape[0]
 
-    val_out_idx = torch.argmax(val_logits, dim=-1)
-    matches = (val_out_idx == val_targets_t.unsqueeze(0)).sum(dim=1)
-    val_scores = matches.float() / T
+            out_idx = torch.argmax(logits_btn, dim=-1)                              # [B, T]
+            val_scores[c_indices] = (out_idx == val_targets_t.unsqueeze(0)).float().mean(dim=1)
 
-    flat_logits = val_logits.reshape(C * T, n)
-    flat_targets = val_targets_t.repeat(C)
-    loss_el = torch.nn.functional.cross_entropy(flat_logits, flat_targets, reduction='none')
-    val_losses = loss_el.reshape(C, T).mean(dim=1)
-    return val_scores, val_losses
+            ce = torch.nn.functional.cross_entropy(
+                logits_btn.reshape(B * T, n), val_targets_t.repeat(B), reduction='none'
+            ).reshape(B, T).mean(dim=1)
+            val_ce[c_indices] = ce
+
+            if is_ngram:
+                val_ngram[c_indices] = loss_fn(logits_btn)
+
+    return val_scores, val_ce, val_ngram
 
 
-def batched_forward_backward(net, input_indices, targets, active_mask, batch_c, batch_t):
-    """Accumulate gradients across candidate and token mini-batches.
+def batched_forward_backward(net, input_indices, targets, active_mask, loss_fn, batch_c, batch_t):
+    """Accumulate gradients across candidate (and, for ce, token) mini-batches.
 
-    Loops over (C-batch, T-batch) pairs. Inactive C-batches are skipped.
-    Loss is the mean cross-entropy over all T steps (gradient scale matches).
     Does not call zero_grad or optimizer.step. Returns loss_per_candidate [C].
     """
     C = net.num_candidates
     T = len(input_indices)
     loss_per_candidate = torch.zeros(C, device=targets.device)
 
-    # Precompute step offsets once for the full sequence; reused across all batches.
+    # ----- Sequential loss (n-gram): full per-candidate sequence, C-batch only -----
+    if getattr(loss_fn, "requires_full_sequence", False):
+        for c_start in range(0, C, batch_c):
+            c_indices = torch.arange(c_start, min(c_start + batch_c, C), device=targets.device)
+            active_batch = active_mask[c_indices]
+            if not active_batch.any():
+                continue
+
+            logits_btn = net.encrypt_sequence_slice(input_indices, c_indices).transpose(0, 1)  # [B, T, n]
+            loss_b = loss_fn(logits_btn)  # [B]
+            (loss_b * active_batch.float()).sum().backward()
+            loss_per_candidate[c_indices] = loss_b.detach()
+
+            del logits_btn, loss_b
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+        return loss_per_candidate
+
+    # ----- Per-token loss (cross-entropy): T-batched, unchanged -----
     step_offsets_full = net.precompute_steps(T)  # [T, C, num_rotors]
 
     for c_start in range(0, C, batch_c):
@@ -140,11 +224,13 @@ def batched_forward_backward(net, input_indices, targets, active_mask, batch_c, 
             (loss_t_b * active_batch.float()).sum().backward()
 
             del logits_b, flat, loss_el, loss_t_b
-            torch.cuda.empty_cache()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
         loss_per_candidate[c_indices] = loss_sum_b  # already normalised by T
 
     return loss_per_candidate
+
 
 print("\nStarting Multi-Basin Parallel Optimization...")
 K_val = min(K, C_init)
@@ -152,13 +238,10 @@ active_mask = torch.ones(C_init, dtype=torch.bool, device=device)
 
 for step in range(TOTAL_STEPS):
     net.train()
-    target_enigma.reset(true_positions)
-    plaintext = "".join(random.choice(config.alphabet) for _ in range(LEN_STRING))
-    input_indices = [char_to_idx[c] for c in plaintext]
-    targets = torch.tensor([char_to_idx[target_enigma.encrypt_char(c)] for c in plaintext], dtype=torch.long, device=device)
+    input_indices, targets = make_data(LEN_STRING)
 
     optimizer.zero_grad()
-    loss_per_candidate = batched_forward_backward(net, input_indices, targets, active_mask, BATCH_C, BATCH_T)
+    loss_per_candidate = batched_forward_backward(net, input_indices, targets, active_mask, loss_fn, BATCH_C, BATCH_T)
     step_losses.append(loss_per_candidate.detach())
 
     with torch.no_grad():
@@ -180,8 +263,11 @@ for step in range(TOTAL_STEPS):
     optimizer.step()
 
     if step % LOG_STEP == 0:
-        val_scores, val_losses = evaluate_validation(net, val_input_indices, val_targets_tensor)
-        val_losses_history.append(val_losses.detach())
+        val_scores, val_ce, val_ngram = evaluate_validation(net, val_input_indices, val_targets_tensor, loss_fn)
+        # Selection metric (lower is better): unsupervised n-gram loss in ngram mode,
+        # supervised cross-entropy otherwise.
+        val_select = val_ngram if NGRAM else val_ce
+        val_losses_history.append(val_select.detach())
 
         if step >= WINDOW:
             loss_decrease = step_losses[-WINDOW] - step_losses[-1]
@@ -192,15 +278,19 @@ for step in range(TOTAL_STEPS):
 
         candidates_metrics = []
         for c in range(C_init):
-            metrics = {
+            candidates_metrics.append({
                 'index': c,
                 'val_score': val_scores[c].item(),
                 'loss_decrease': loss_decrease[c].item(),
-                'val_loss': val_losses[c].item()
-            }
-            candidates_metrics.append(metrics)
+                'val_select': val_select[c].item(),
+            })
 
-        candidates_metrics.sort(key=lambda x: (x['val_score'], x['loss_decrease'], -x['val_loss']), reverse=True)
+        if NGRAM:
+            # Unsupervised: rank purely by n-gram loss (ascending), tie-break by training progress.
+            candidates_metrics.sort(key=lambda x: (x['val_select'], -x['loss_decrease']))
+        else:
+            candidates_metrics.sort(key=lambda x: (x['val_score'], x['loss_decrease'], -x['val_select']), reverse=True)
+
         topk_indices = [m['index'] for m in candidates_metrics[:K_val]]
         active_mask = torch.zeros(C_init, dtype=torch.bool, device=device)
         active_mask[topk_indices] = True
@@ -213,27 +303,34 @@ for step in range(TOTAL_STEPS):
         best_candidate_pos = net.get_positions()[best_idx] if net.num_candidates > 1 else net.get_positions()
         best_candidate_int_pos = net.get_integer_positions()[best_idx] if net.num_candidates > 1 else net.get_integer_positions()
         orig_pos = active_original_positions[best_idx]
+        monitor = f", MonitorAcc = {val_scores[best_idx].item():.3f}" if NGRAM and step % LOG_STEP == 0 else ""
 
-        print(f"Step {step:>4d} | Active Candidates: {active_mask.sum().item():>5d}/{net.num_candidates} | Best Candidate (Orig: {orig_pos}): Loss = {best_candidate_loss:.4f}, Rounded Pos = {best_candidate_int_pos}, Continuous = {[f'{p:.2f}' for p in best_candidate_pos]}")
+        print(f"Step {step:>4d} | Active Candidates: {active_mask.sum().item():>5d}/{net.num_candidates} | Best Candidate (Orig: {orig_pos}): Loss = {best_candidate_loss:.4f}, Rounded Pos = {best_candidate_int_pos}, Continuous = {[f'{p:.2f}' for p in best_candidate_pos]}{monitor}")
 
     if len(val_losses_history) >= 3:
         recent_val = torch.stack(val_losses_history[-3:])
         stds = torch.std(recent_val, dim=0)
-        best_idx = torch.argmin(val_losses).item()
-        if stds[best_idx].item() < STABILITY_EPS and val_losses[best_idx].item() < 0.05:
+        best_idx = torch.argmin(val_losses_history[-1]).item()
+        stable = stds[best_idx].item() < STABILITY_EPS
+        # In ce mode also require near-zero loss (perfect fit). In ngram mode the loss
+        # floor is the English entropy, so stability alone signals convergence.
+        converged = stable and (NGRAM or val_losses_history[-1][best_idx].item() < 0.05)
+        if converged:
             print(f"\nStep {step:>4d} | Best candidate stabilized. Early stopping.")
             break
 
 print("\nTraining complete.")
-val_scores, val_losses = evaluate_validation(net, val_input_indices, val_targets_tensor)
-winner_idx = torch.argmin(val_losses).item()
+val_scores, val_ce, val_ngram = evaluate_validation(net, val_input_indices, val_targets_tensor, loss_fn)
+val_select = val_ngram if NGRAM else val_ce
+winner_idx = torch.argmin(val_select).item()
+best_val_select = val_select[winner_idx].item()
 best_val_score = val_scores[winner_idx].item()
-best_val_loss = val_losses[winner_idx].item()
 winner_pos = net.get_positions()[winner_idx]
 winner_int_pos = net.get_integer_positions()[winner_idx]
 winner_orig_pos = active_original_positions[winner_idx]
 
-print(f"Winner Candidate (Orig: {winner_orig_pos}): Loss = {best_val_loss:.4f}, Val Acc = {best_val_score:.4f}, Rounded Pos = {winner_int_pos}, Continuous = {[f'{p:.2f}' for p in winner_pos]}")
+metric_name = "N-gram Loss" if NGRAM else "Loss"
+print(f"Winner Candidate (Orig: {winner_orig_pos}): {metric_name} = {best_val_select:.4f}, Monitor Acc = {best_val_score:.4f}, Rounded Pos = {winner_int_pos}, Continuous = {[f'{p:.2f}' for p in winner_pos]}")
 print(f"Recovered integer positions: {winner_int_pos}, True: {true_positions}")
 
 print(f"Pruning network down to the winner candidate at index {winner_idx}...")
@@ -241,11 +338,18 @@ net.prune_candidates([winner_idx])
 
 print("\nVerification on final test sequence...")
 net.eval()
-test_plaintext = "".join(random.choice(config.alphabet) for _ in range(n ** 2))
-target_enigma.reset(true_positions)
-target_encrypted = target_enigma.encrypt(test_plaintext)
-learner_encrypted = net.encrypt_string(test_plaintext, greedy=True)
-matches = sum(a == b for a, b in zip(target_encrypted, learner_encrypted))
+if NGRAM:
+    test_plaintext = sample_english(n ** 2)
+    target_enigma.reset(true_positions)
+    test_cipher = target_enigma.encrypt(test_plaintext)
+    learner_decrypted = net.encrypt_string(test_cipher, greedy=True)
+    matches = sum(a == b for a, b in zip(test_plaintext, learner_decrypted))
+else:
+    test_plaintext = "".join(random.choice(config.alphabet) for _ in range(n ** 2))
+    target_enigma.reset(true_positions)
+    target_encrypted = target_enigma.encrypt(test_plaintext)
+    learner_encrypted = net.encrypt_string(test_plaintext, greedy=True)
+    matches = sum(a == b for a, b in zip(target_encrypted, learner_encrypted))
 print(f"Accuracy: {matches}/{n**2} ({100 * matches / (n ** 2):.1f}%)")
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "models"))
