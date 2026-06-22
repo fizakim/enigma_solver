@@ -15,12 +15,14 @@ from config.alphabet5 import alphabet5
 from config.alphabet10 import alphabet10
 from config.alphabet15 import alphabet15
 from config.alphabet26 import alphabet26
+from comparison.continuous_comparison import compare
+from visualiser.continuous_visualise import visualise_continuous
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 train_config = TrainConfig(
-    enigma_config=alphabet26,
+    enigma_config=alphabet3,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
@@ -252,3 +254,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 weights_path = os.path.join(models_dir, f"continuous_qnet_{timestamp}.pth")
 torch.save(net.state_dict(), weights_path)
 print(f"Saved weights to: {weights_path}")
+
+print("\nRunning comparison...")
+compare(weights_path, config=config)
+visualise_continuous(net, config.build(), true_positions=true_positions, show_numbers=(n <= 10))
