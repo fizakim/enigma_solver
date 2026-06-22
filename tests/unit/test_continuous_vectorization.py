@@ -88,6 +88,34 @@ def test_vectorization_and_phase_equivalence():
     print(f"Max absolute difference: {max_diff:.2e}")
     assert torch.allclose(old_logits, new_logits, atol=1e-5), f"Logits mismatch, max diff: {max_diff}"
 
+def test_encrypt_sequence_slice_equivalence():
+    torch.manual_seed(99)
+    np.random.seed(99)
+    random.seed(99)
+
+    config = alphabet5
+    n = len(config.alphabet)
+    num_rotors = len(config.rotors)
+    all_positions = [[random.randint(0, n - 1) for _ in range(num_rotors)] for _ in range(20)]
+    net = ContinuousQNet(config, initial_positions=all_positions)
+
+    T = 12
+    input_indices = [random.randint(0, n - 1) for _ in range(T)]
+    c_indices = torch.tensor([0, 3, 7, 15, 19])
+
+    full_out = net.encrypt_sequence(input_indices)                          # [T, 20, n]
+    slice_out = net.encrypt_sequence_slice(input_indices, c_indices)        # [T, 5, n]
+
+    assert full_out.shape == (T, 20, n)
+    assert slice_out.shape == (T, 5, n)
+    max_diff = torch.max(torch.abs(full_out[:, c_indices, :] - slice_out)).item()
+    print(f"Slice max absolute difference: {max_diff:.2e}")
+    assert torch.allclose(full_out[:, c_indices, :], slice_out, atol=1e-5), \
+        f"Slice mismatch, max diff: {max_diff}"
+
+
 if __name__ == "__main__":
     test_vectorization_and_phase_equivalence()
     print("Vectorization test passed successfully!")
+    test_encrypt_sequence_slice_equivalence()
+    print("Slice equivalence test passed successfully!")

@@ -142,6 +142,38 @@ class ContinuousQNet(nn.Module):
 
         return (U @ self.F_inv.T).real.float()
 
+    def encrypt_sequence_slice(self, input_indices, c_indices, step_offsets=None):
+        """Forward pass for a subset of candidates. Returns [T, B, n] float32.
+
+        step_offsets: optional [T, B, num_rotors] int64 tensor. When provided
+        (e.g. for T-batching) it is used directly, skipping precompute_steps.
+        When None, step_offsets are computed from the full sequence length.
+        """
+        if step_offsets is None:
+            T = len(input_indices)
+            step_offsets = self.precompute_steps(T)[:, c_indices, :]  # [T, B, num_rotors]
+
+        phi_b = self.phi[c_indices]                               # [B, num_rotors]
+        input_indices_t = torch.tensor(input_indices, dtype=torch.long, device=self.phi.device)
+        U = self.F[:, input_indices_t].T.unsqueeze(1).expand(-1, len(c_indices), -1)  # [T, B, n]
+        k_expanded = self.k.reshape(1, 1, -1)
+
+        for i in range(self.num_rotors - 1, -1, -1):
+            Q = self.rotors[i].get_Q()[c_indices]                 # [B, n, n]
+            phi_eff = phi_b[:, i].unsqueeze(0) + step_offsets[:, :, i].float()
+            phase = torch.exp(-2j * torch.pi * k_expanded * phi_eff.unsqueeze(-1) / self.n)
+            U = torch.einsum("tcn,cni->tci", phase * U, Q.transpose(-2, -1)) * phase.conj()
+
+        U = U @ self.reflector_fourier.T
+
+        for i in range(self.num_rotors):
+            Q = self.rotors[i].get_Q()[c_indices]
+            phi_eff = phi_b[:, i].unsqueeze(0) + step_offsets[:, :, i].float()
+            phase = torch.exp(-2j * torch.pi * k_expanded * phi_eff.unsqueeze(-1) / self.n)
+            U = torch.einsum("tcn,cni->tci", phase * U, Q.conj()) * phase.conj()
+
+        return (U @ self.F_inv.T).real.float()
+
     def get_positions(self):
         pos = self.phi.detach()
         return pos[0].tolist() if pos.shape[0] == 1 else pos.tolist()
