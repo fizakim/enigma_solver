@@ -13,11 +13,8 @@ def _dft_matrix(n):
 
 
 def _best_candidate(net):
-    """Candidate index whose phi is closest to integer values (most converged)."""
-    phi = net.phi.detach()
-    phi_mod = phi % 1
-    frac_dev = torch.min(phi_mod, 1 - phi_mod).sum(dim=1)
-    return int(torch.argmin(frac_dev).item())
+    """Return 0 — positions are fixed integers so any candidate is equally integer-like."""
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -25,46 +22,30 @@ def _best_candidate(net):
 # ---------------------------------------------------------------------------
 
 def _draw_position_section(axes_row, net, true_positions):
-    """Fill the pre-created axes (one per rotor) with phi scatter plots.
+    """Fill the pre-created axes (one per rotor) with fixed-position histograms.
 
-    Each subplot shows where every candidate's continuous phi value sits on the
-    [0, n) number line.  Vertical grey ticks mark each integer; a gold bar marks
-    the true initial position when provided.  Points are coloured by fractional
-    deviation from the nearest integer: green (converged) → red (mid-fraction).
+    Each subplot shows how many candidates start at each integer position.
+    The selected (best) candidate's position is highlighted in blue; the true
+    initial position is marked with a gold dashed line.
     """
     n = net.n
-    phi = net.phi.detach().cpu()          # [C, num_rotors]
-    C = phi.shape[0]
+    positions = net.initial_positions.cpu()  # [C, num_rotors], integer
+    C = positions.shape[0]
     alphabet = net.config.alphabet
-
-    # Fractional deviation for colouring: 0 = integer, 0.5 = maximally fractional
-    phi_mod = phi % 1
-    frac_dev = torch.min(phi_mod, 1 - phi_mod)  # [C, num_rotors], in [0, 0.5]
-
     best_c = _best_candidate(net)
 
-    cmap = matplotlib.colormaps["RdYlGn_r"]   # green=0 (converged), red=0.5 (fractional)
-    norm = mcolors.Normalize(vmin=0.0, vmax=0.5)
-
     for r_idx, ax in enumerate(axes_row):
-        phi_r = phi[:, r_idx].numpy()          # [C]
-        frac_r = frac_dev[:, r_idx].numpy()    # [C]
+        pos_r = positions[:, r_idx].numpy()   # [C] integer positions
 
-        # Jitter y slightly so overlapping points are visible
-        rng = np.random.default_rng(seed=r_idx)
-        y = rng.uniform(-0.4, 0.4, size=C)
+        # Count candidates per position
+        counts = np.bincount(pos_r, minlength=n)
+        bar_colors = ["steelblue"] * n
 
-        colors = cmap(norm(frac_r))
-        ax.scatter(phi_r, y, c=colors, s=40, zorder=3, linewidths=0.4,
-                   edgecolors="black", alpha=0.85)
+        # Highlight the best candidate's position
+        best_pos = int(pos_r[best_c])
+        bar_colors[best_pos] = "deepskyblue"
 
-        # Highlight best candidate
-        ax.scatter(phi_r[best_c], y[best_c], s=120, color="deepskyblue",
-                   edgecolors="black", linewidths=1.2, zorder=5, label="best")
-
-        # Integer grid lines (light grey, at each alphabet position)
-        for int_pos in range(n):
-            ax.axvline(int_pos, color="#cccccc", linewidth=0.8, zorder=1)
+        ax.bar(range(n), counts, color=bar_colors, edgecolor="black", linewidth=0.6, zorder=3)
 
         # True position marker
         if true_positions is not None:
@@ -74,20 +55,11 @@ def _draw_position_section(axes_row, net, true_positions):
             ax.legend(fontsize=7, loc="upper right", framealpha=0.7)
 
         ax.set_xlim(-0.7, n - 0.3)
-        ax.set_ylim(-1, 1)
-        ax.set_yticks([])
         ax.set_xticks(range(n))
         ax.set_xticklabels(list(alphabet), fontsize=9)
-        ax.set_title(f"Rotor {r_idx}  φ landscape", fontsize=10, weight="bold")
-        ax.set_xlabel("φ (continuous position)", fontsize=8)
-
-        # Colourbar for fractional deviation
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cb = plt.colorbar(sm, ax=ax, orientation="horizontal", pad=0.18, fraction=0.06)
-        cb.set_label("frac. deviation from integer", fontsize=7)
-        cb.set_ticks([0, 0.25, 0.5])
-        cb.set_ticklabels(["0 (integer)", "0.25", "0.5 (mid)"])
+        ax.set_ylabel("# candidates", fontsize=8)
+        ax.set_title(f"Rotor {r_idx}  initial positions", fontsize=10, weight="bold")
+        ax.set_xlabel("position", fontsize=8)
 
 
 # ---------------------------------------------------------------------------
@@ -247,15 +219,14 @@ def visualise_continuous(
 ):
     """Two-section visualisation for ContinuousQNet.
 
-    Top section — position landscape:
-        One scatter plot per rotor showing where every candidate's continuous phi
-        sits.  Points coloured green (converged to an integer) through red (stuck
-        mid-way between integers).  A gold dashed line marks the true initial
-        position when *true_positions* is supplied.
+    Top section — candidate positions:
+        One bar chart per rotor showing how many candidates start at each
+        integer position.  A gold dashed line marks the true initial position
+        when *true_positions* is supplied.
 
     Bottom section — wiring quality:
-        Five-column Q-matrix analysis for a single candidate (the most
-        integer-like one by default, or *best_candidate_idx* if given).
+        Five-column Q-matrix analysis for a single candidate (candidate 0 by
+        default, or *best_candidate_idx* if given).
         Columns: target spatial | learned spatial | argmax | target |Q| | learned |Q|.
 
     Parameters
@@ -264,10 +235,9 @@ def visualise_continuous(
     target_sim : Enigma simulator (built from config.build())
     true_positions : list[int] | None
         True initial positions used during training.  When None the gold
-        reference line is omitted from the position landscape.
+        reference line is omitted from the position chart.
     best_candidate_idx : int | None
-        Which candidate to use for the wiring section.  Defaults to the
-        candidate whose phi is closest to integer values.
+        Which candidate to use for the wiring section.  Defaults to 0.
     show_numbers : bool
         Annotate matrix cells with their values.
     """
@@ -294,7 +264,7 @@ def visualise_continuous(
 
     fig = plt.figure(figsize=(5 * 5, total_height))
     fig.suptitle(
-        f"ContinuousQNet — position landscape & wiring quality"
+        f"ContinuousQNet — candidate positions & wiring quality"
         f"  (candidate {best_candidate_idx} / {net.num_candidates})",
         fontsize=13, y=1.01,
     )

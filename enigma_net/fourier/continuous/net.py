@@ -13,7 +13,7 @@ class ContinuousQRotor(nn.Module):
         for col, row in enumerate(torch.randperm(n).long()):
             P[row, col] = 1.0
         Q = F @ P.to(F.dtype) @ F_inv
-        
+
         self.Q_real = nn.Parameter(Q.real.contiguous().unsqueeze(0).repeat(num_candidates, 1, 1))
         self.Q_imag = nn.Parameter(Q.imag.contiguous().unsqueeze(0).repeat(num_candidates, 1, 1))
 
@@ -41,11 +41,11 @@ class ContinuousQNet(nn.Module):
         self.register_buffer('omega', torch.exp(-2j * torch.pi * k / self.n).to(torch.complex64))
 
         self.num_candidates = len(initial_positions)
-        phi_init = torch.tensor(
-            [[float(config.parse_position(p)) for p in pos_list] for pos_list in initial_positions],
-            dtype=torch.float32
+        pos_init = torch.tensor(
+            [[config.parse_position(p) for p in pos_list] for pos_list in initial_positions],
+            dtype=torch.long
         )
-        self.phi = nn.Parameter(phi_init)
+        self.register_buffer('initial_positions', pos_init)  # [C, num_rotors], fixed integers
         self.notches = [config.parse_position(r.notch) for r in config.rotors]
 
         self.rotors = nn.ModuleList([
@@ -58,9 +58,8 @@ class ContinuousQNet(nn.Module):
         self.register_buffer('R_real', R_fourier.real.contiguous())
         self.register_buffer('R_imag', R_fourier.imag.contiguous())
 
-        self._cached_int_positions = None
-        self._cached_step_offsets = None
         self._cached_T = None
+        self._cached_step_positions = None
 
     @property
     def reflector_fourier(self):
@@ -71,64 +70,63 @@ class ContinuousQNet(nn.Module):
         return (self.F_inv @ self.reflector_fourier @ self.F).real
 
     def prune_candidates(self, keep_indices):
-        idx = torch.tensor(keep_indices, dtype=torch.long, device=self.phi.device)
-        self.phi = nn.Parameter(self.phi.data[idx])
+        idx = torch.tensor(keep_indices, dtype=torch.long, device=self.initial_positions.device)
+        self.initial_positions = self.initial_positions[idx]
         for r in self.rotors:
             r.Q_real = nn.Parameter(r.Q_real.data[idx])
             r.Q_imag = nn.Parameter(r.Q_imag.data[idx])
         self.num_candidates = len(keep_indices)
+        self._cached_T = None  # invalidate after pruning
 
     def precompute_steps(self, T):
-        int_positions = torch.round(self.phi.detach()).long() % self.n
-        if (self._cached_int_positions is not None and 
-            self._cached_T == T and 
-            torch.equal(int_positions, self._cached_int_positions)):
-            return self._cached_step_offsets
+        """Return absolute rotor positions at each of the T steps, shape [T, C, num_rotors]."""
+        if self._cached_T == T:
+            return self._cached_step_positions
 
-        positions = int_positions.clone()
-        offsets = []
-        notches = torch.tensor(self.notches, dtype=torch.long, device=self.phi.device)
-        C = self.phi.shape[0]
+        positions = self.initial_positions.clone()  # [C, num_rotors]
+        step_positions = []
+        notches = torch.tensor(self.notches, dtype=torch.long, device=self.initial_positions.device)
+        C = self.num_candidates
 
         for _ in range(T):
-            step = torch.ones(C, dtype=torch.bool, device=self.phi.device)
+            step = torch.ones(C, dtype=torch.bool, device=self.initial_positions.device)
             for i in range(self.num_rotors - 1, -1, -1):
                 at_notch = (positions[:, i] == notches[i])
                 positions[:, i] = torch.where(step, (positions[:, i] + 1) % self.n, positions[:, i])
                 step = step & at_notch
-            offsets.append((positions - int_positions) % self.n)
+            step_positions.append(positions.clone())
 
-        self._cached_int_positions = int_positions.clone()
         self._cached_T = T
-        self._cached_step_offsets = torch.stack(offsets, dim=0)
-        return self._cached_step_offsets
+        self._cached_step_positions = torch.stack(step_positions, dim=0)  # [T, C, num_rotors]
+        return self._cached_step_positions
 
-    def forward(self, v, step_offset):
+    def forward(self, v, step_position):
+        """Single-step forward. step_position: [C, num_rotors] absolute positions."""
         u = self.F @ v.to(self.F.dtype)
-        u = u.unsqueeze(0).expand(self.phi.shape[0], -1)
+        u = u.unsqueeze(0).expand(self.num_candidates, -1)
         for i in range(self.num_rotors - 1, -1, -1):
             Q = self.rotors[i].get_Q()
-            phi_eff = self.phi[:, i] + step_offset[:, i].float()
+            phi_eff = step_position[:, i].float()
             phase = torch.exp(-2j * torch.pi * self.k * phi_eff.unsqueeze(-1) / self.n)
             u = torch.bmm((phase * u).unsqueeze(1), Q.transpose(-2, -1)).squeeze(1) * phase.conj()
         u = u @ self.reflector_fourier.T
         for i in range(self.num_rotors):
             Q = self.rotors[i].get_Q()
-            phi_eff = self.phi[:, i] + step_offset[:, i].float()
+            phi_eff = step_position[:, i].float()
             phase = torch.exp(-2j * torch.pi * self.k * phi_eff.unsqueeze(-1) / self.n)
             u = torch.bmm((phase * u).unsqueeze(1), Q.conj()).squeeze(1) * phase.conj()
         return (u @ self.F_inv.T).real.float()
 
     def encrypt_sequence(self, input_indices):
         T = len(input_indices)
-        step_offsets = self.precompute_steps(T)
-        input_indices_t = torch.tensor(input_indices, dtype=torch.long, device=self.phi.device)
-        U = self.F[:, input_indices_t].T.unsqueeze(1).expand(-1, self.phi.shape[0], -1)
+        step_positions = self.precompute_steps(T)  # [T, C, num_rotors]
+        input_indices_t = torch.tensor(input_indices, dtype=torch.long, device=self.initial_positions.device)
+        U = self.F[:, input_indices_t].T.unsqueeze(1).expand(-1, self.num_candidates, -1)
         k_expanded = self.k.reshape(1, 1, -1)
 
         for i in range(self.num_rotors - 1, -1, -1):
             Q = self.rotors[i].get_Q()
-            phi_eff = self.phi[:, i].unsqueeze(0) + step_offsets[:, :, i].float()
+            phi_eff = step_positions[:, :, i].float()  # [T, C]
             phase = torch.exp(-2j * torch.pi * k_expanded * phi_eff.unsqueeze(-1) / self.n)
             U = torch.einsum("tcn,cni->tci", phase * U, Q.transpose(-2, -1)) * phase.conj()
 
@@ -136,31 +134,30 @@ class ContinuousQNet(nn.Module):
 
         for i in range(self.num_rotors):
             Q = self.rotors[i].get_Q()
-            phi_eff = self.phi[:, i].unsqueeze(0) + step_offsets[:, :, i].float()
+            phi_eff = step_positions[:, :, i].float()  # [T, C]
             phase = torch.exp(-2j * torch.pi * k_expanded * phi_eff.unsqueeze(-1) / self.n)
             U = torch.einsum("tcn,cni->tci", phase * U, Q.conj()) * phase.conj()
 
         return (U @ self.F_inv.T).real.float()
 
-    def encrypt_sequence_slice(self, input_indices, c_indices, step_offsets=None):
+    def encrypt_sequence_slice(self, input_indices, c_indices, step_positions=None):
         """Forward pass for a subset of candidates. Returns [T, B, n] float32.
 
-        step_offsets: optional [T, B, num_rotors] int64 tensor. When provided
-        (e.g. for T-batching) it is used directly, skipping precompute_steps.
-        When None, step_offsets are computed from the full sequence length.
+        step_positions: optional [T, B, num_rotors] int64 tensor of absolute rotor
+        positions. When provided (e.g. for T-batching) it is used directly, skipping
+        precompute_steps. When None, positions are computed from the full sequence length.
         """
-        if step_offsets is None:
+        if step_positions is None:
             T = len(input_indices)
-            step_offsets = self.precompute_steps(T)[:, c_indices, :]  # [T, B, num_rotors]
+            step_positions = self.precompute_steps(T)[:, c_indices, :]  # [T, B, num_rotors]
 
-        phi_b = self.phi[c_indices]                               # [B, num_rotors]
-        input_indices_t = torch.tensor(input_indices, dtype=torch.long, device=self.phi.device)
+        input_indices_t = torch.tensor(input_indices, dtype=torch.long, device=self.initial_positions.device)
         U = self.F[:, input_indices_t].T.unsqueeze(1).expand(-1, len(c_indices), -1)  # [T, B, n]
         k_expanded = self.k.reshape(1, 1, -1)
 
         for i in range(self.num_rotors - 1, -1, -1):
-            Q = self.rotors[i].get_Q()[c_indices]                 # [B, n, n]
-            phi_eff = phi_b[:, i].unsqueeze(0) + step_offsets[:, :, i].float()
+            Q = self.rotors[i].get_Q()[c_indices]       # [B, n, n]
+            phi_eff = step_positions[:, :, i].float()   # [T, B]
             phase = torch.exp(-2j * torch.pi * k_expanded * phi_eff.unsqueeze(-1) / self.n)
             U = torch.einsum("tcn,cni->tci", phase * U, Q.transpose(-2, -1)) * phase.conj()
 
@@ -168,19 +165,19 @@ class ContinuousQNet(nn.Module):
 
         for i in range(self.num_rotors):
             Q = self.rotors[i].get_Q()[c_indices]
-            phi_eff = phi_b[:, i].unsqueeze(0) + step_offsets[:, :, i].float()
+            phi_eff = step_positions[:, :, i].float()   # [T, B]
             phase = torch.exp(-2j * torch.pi * k_expanded * phi_eff.unsqueeze(-1) / self.n)
             U = torch.einsum("tcn,cni->tci", phase * U, Q.conj()) * phase.conj()
 
         return (U @ self.F_inv.T).real.float()
 
     def get_positions(self):
-        pos = self.phi.detach()
+        pos = self.initial_positions.float()
         return pos[0].tolist() if pos.shape[0] == 1 else pos.tolist()
 
     def get_integer_positions(self):
-        int_pos = torch.round(self.phi.detach()).long() % self.n
-        return int_pos[0].tolist() if int_pos.shape[0] == 1 else int_pos.tolist()
+        pos = self.initial_positions
+        return pos[0].tolist() if pos.shape[0] == 1 else pos.tolist()
 
     def encrypt_string(self, text, candidate_idx=0, greedy=True):
         indices = [self.char_to_idx[c] for c in text if c in self.char_to_idx]

@@ -33,14 +33,6 @@ def _encryption_matrix(net, c, stepped_positions):
     return E
 
 
-def _best_candidate(net):
-    """Return the candidate index whose phi is closest to integer values overall."""
-    phi = net.phi.detach()
-    phi_mod = phi % 1
-    frac_dev = torch.min(phi_mod, 1 - phi_mod).sum(dim=1)  # [C]
-    return int(torch.argmin(frac_dev).item())
-
-
 def compare(weights_path=None, config=alphabet3):
     if not weights_path:
         patterns = ["continuous_qnet_*.pth", "continuous_learner_*.pth"]
@@ -52,8 +44,8 @@ def compare(weights_path=None, config=alphabet3):
     print(f"Loading weights from {weights_path}")
     state_dict = torch.load(weights_path, map_location="cpu")
 
-    num_candidates = state_dict["phi"].shape[0]
-    num_rotors = state_dict["phi"].shape[1]
+    num_candidates = state_dict["initial_positions"].shape[0]
+    num_rotors = state_dict["initial_positions"].shape[1]
     print(f"Model: {num_candidates} candidate(s), {num_rotors} rotor(s)")
 
     from enigma_net.fourier.continuous.net import ContinuousQNet
@@ -62,21 +54,19 @@ def compare(weights_path=None, config=alphabet3):
     learner.load_state_dict(state_dict)
     learner.eval()
 
-    # Report learned positions for every candidate
-    phi = learner.phi.detach()
+    int_positions = learner.initial_positions  # [C, num_rotors]
     n = learner.n
-    print("\nLearned positions:")
-    for c in range(num_candidates):
-        cont = [f"{phi[c, i].item():.3f}" for i in range(num_rotors)]
-        rounded = [int(torch.round(phi[c, i]).item()) % n for i in range(num_rotors)]
-        phi_mod = phi[c] % 1
-        frac = torch.min(phi_mod, 1 - phi_mod).sum().item()
-        print(f"  Candidate {c:>3d}: phi={cont}  rounded={rounded}  frac_dev={frac:.4f}")
 
-    best_c = _best_candidate(learner)
-    best_rounded = [int(torch.round(phi[best_c, i]).item()) % n for i in range(num_rotors)]
-    print(f"\nUsing candidate {best_c} (most integer-like) for wiring comparison")
-    print(f"  Its rounded positions: {best_rounded}")
+    print("\nFixed initial positions:")
+    for c in range(num_candidates):
+        pos = int_positions[c].tolist()
+        print(f"  Candidate {c:>3d}: positions={pos}")
+
+    # With phi removed there is no continuous drift; pick the single candidate (post-prune).
+    best_c = 0
+    best_pos = int_positions[best_c].tolist()
+    print(f"\nUsing candidate {best_c} for wiring comparison")
+    print(f"  Its integer positions: {best_pos}")
 
     target = config.build()
     target_reflector = torch.from_numpy(target.reflector.matrix).float()

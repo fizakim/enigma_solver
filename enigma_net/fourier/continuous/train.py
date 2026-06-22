@@ -31,7 +31,7 @@ print(f"Using device: {device}")
 # (trigram log-prob). The known plaintext is used only as a monitor-only accuracy
 # readout, never for candidate selection or early-stopping.
 # ---------------------------------------------------------------------------
-LOSS_MODE = "ngram"   # "ce" or "ngram"
+LOSS_MODE = "ce"      # "ce" or "ngram"
 NGRAM = LOSS_MODE == "ngram"
 TAU = 0.5             # softmax temperature for the n-gram soft decoding (fixed)
 
@@ -40,13 +40,12 @@ NGRAM_PATH = os.path.join(_ROOT, "language", "ngram", "3grams.pth")
 CORPUS_PATH = os.path.join(_ROOT, "language", "fineweb", "fineweb.txt")
 
 train_config = TrainConfig(
-    enigma_config=alphabet26 if NGRAM else alphabet3,
+    enigma_config=alphabet26,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
 )
 
-PHI_LR = 0.1
 Q_LR = 0.01
 TOTAL_STEPS = 2500
 LOG_STEP = 10
@@ -116,10 +115,7 @@ def make_data(length):
 
 net = ContinuousQNet(config, initial_positions=all_positions).to(device)
 
-optimizer = torch.optim.Adam([
-    {'params': [net.phi], 'lr': PHI_LR},
-    {'params': [p for name, p in net.named_parameters() if name != 'phi'], 'lr': Q_LR}
-])
+optimizer = torch.optim.Adam(net.parameters(), lr=Q_LR)
 
 active_original_positions = list(all_positions)
 step_losses = []
@@ -245,8 +241,6 @@ for step in range(TOTAL_STEPS):
     step_losses.append(loss_per_candidate.detach())
 
     with torch.no_grad():
-        if net.phi.grad is not None:
-            net.phi.grad[~active_mask] = 0.0
         for rotor in net.rotors:
             if rotor.Q_real.grad is not None:
                 rotor.Q_real.grad[~active_mask] = 0.0
