@@ -8,6 +8,7 @@ import torch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from enigma_net.fourier.continuous.net import ContinuousQNet
+from enigma_net.fourier.continuous.perm_reg import permutation_regularizer
 from enigma_net import CrossEntropyLoss, NgramLoss, load_ngram_logprobs
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
@@ -31,7 +32,7 @@ print(f"Using device: {device}")
 # (trigram log-prob). The known plaintext is used only as a monitor-only accuracy
 # readout, never for candidate selection or early-stopping.
 # ---------------------------------------------------------------------------
-LOSS_MODE = "ce"      # "ce" or "ngram"
+LOSS_MODE = "ngram"   # "ce" or "ngram"
 NGRAM = LOSS_MODE == "ngram"
 TAU = 0.5             # softmax temperature for the n-gram soft decoding (fixed)
 
@@ -56,6 +57,10 @@ BATCH_T = 500
 K = 10
 WINDOW = 20
 STABILITY_EPS = 0.005
+# Permutation regularizer weight. Penalises Q matrices whose spatial form
+# deviates from a valid permutation (doubly-stochastic + binary entries).
+# 0 disables it. Start around 0.1; raise if cheating persists.
+PERM_LAMBDA = 0.1
 
 config = train_config.enigma_config
 n = len(config.alphabet)
@@ -232,12 +237,26 @@ print("\nStarting Multi-Basin Parallel Optimization...")
 K_val = min(K, C_init)
 active_mask = torch.ones(C_init, dtype=torch.bool, device=device)
 
+# --- Falsification test -------------------------------------------------------
+# Pin the true-position candidate permanently active and report its rank each
+# evaluation. If ngram mode now converges, the failure was the pruning schedule
+# (true candidate discarded before its Q trained), not the removal of phi.
+FORCE_TRUE_ACTIVE = True
+true_candidate_idx = all_positions.index(tuple(true_positions))
+print(f"True candidate index: {true_candidate_idx} (positions {tuple(true_positions)})")
+
 for step in range(TOTAL_STEPS):
     net.train()
     input_indices, targets = make_data(LEN_STRING)
 
     optimizer.zero_grad()
     loss_per_candidate = batched_forward_backward(net, input_indices, targets, active_mask, loss_fn, BATCH_C, BATCH_T)
+
+    if PERM_LAMBDA > 0:
+        perm_loss = PERM_LAMBDA * permutation_regularizer(net)        # [C]
+        (perm_loss * active_mask.float()).sum().backward()
+        loss_per_candidate = loss_per_candidate + perm_loss.detach()
+
     step_losses.append(loss_per_candidate.detach())
 
     with torch.no_grad():
@@ -289,6 +308,23 @@ for step in range(TOTAL_STEPS):
         active_mask = torch.zeros(C_init, dtype=torch.bool, device=device)
         active_mask[topk_indices] = True
 
+        # Diagnostic: where does the true candidate rank, and would it have survived?
+        true_rank = next(i for i, m in enumerate(candidates_metrics) if m['index'] == true_candidate_idx)
+        true_select = val_select[true_candidate_idx].item()
+        true_acc = val_scores[true_candidate_idx].item()
+        survived = "survives" if true_rank < K_val else "PRUNED"
+        with torch.no_grad():
+            perm_diag = permutation_regularizer(net)
+        true_perm = perm_diag[true_candidate_idx].item()
+        best_active_perm = perm_diag[active_mask].min().item()
+        print(f"   [diag] true candidate rank {true_rank:>5d}/{C_init} ({survived}), "
+              f"val_select={true_select:.4f}, MonitorAcc={true_acc:.3f}, "
+              f"best_active={val_select[active_mask].min().item():.4f}, "
+              f"perm_loss(true)={true_perm:.4f}, perm_loss(best_active)={best_active_perm:.4f}")
+
+        if FORCE_TRUE_ACTIVE:
+            active_mask[true_candidate_idx] = True
+
     if step % LOG_STEP == 0 or step == TOTAL_STEPS - 1:
         active_losses = torch.where(active_mask, loss_per_candidate,
                                     torch.full_like(loss_per_candidate, float('inf')))
@@ -309,7 +345,7 @@ for step in range(TOTAL_STEPS):
         # In ce mode also require near-zero loss (perfect fit). In ngram mode the loss
         # floor is the English entropy, so stability alone signals convergence.
         converged = stable and (NGRAM or val_losses_history[-1][best_idx].item() < 0.05)
-        if converged:
+        if converged and not FORCE_TRUE_ACTIVE:
             print(f"\nStep {step:>4d} | Best candidate stabilized. Early stopping.")
             break
 
