@@ -1,5 +1,6 @@
 import sys
 import os
+import glob
 import random
 from datetime import datetime
 import torch
@@ -12,6 +13,7 @@ from visualiser import visualise_q_net
 
 from enigma_net import CrossEntropyLoss, NgramLoss, load_ngram_logprobs
 from enigma_net.train_config import TrainConfig
+from transformer.loss import load_transformer_lm, TransformerLoss
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
 from config.alphabet10 import alphabet10
@@ -23,16 +25,17 @@ print(f"Using device: {device}")
 
 LOAD_TARGET = False
 
-# "ce": supervised, feed plaintext and match the target's ciphertext.
-# "ngram": unsupervised, feed real-English ciphertext and score the learner's
-# decryption by the trigram prior (no labels). Positions stay known.
-LOSS_MODE = "ngram"   # "ce" or "ngram"
-NGRAM = LOSS_MODE == "ngram"
+# "ce":          supervised — feed plaintext and match the target's ciphertext.
+# "ngram":       unsupervised — score the learner's decryption with a trigram prior.
+# "transformer": unsupervised — score with a frozen char-level transformer LM.
+LOSS_MODE = "transformer"   # "ce", "ngram", or "transformer"
+UNSUPERVISED = LOSS_MODE in ("ngram", "transformer")
 TAU = 0.5             # softmax temperature for the soft decoding
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 NGRAM_PATH = os.path.join(_ROOT, "language", "ngram", "3grams.pth")
 CORPUS_PATH = os.path.join(_ROOT, "language", "fineweb", "fineweb.txt")
+MODELS_DIR = os.path.join(_ROOT, "models")
 
 train_config = TrainConfig(
     enigma_config=alphabet26,
@@ -67,13 +70,22 @@ else:
     n_alphabet = len(train_config.enigma_config.alphabet)
     n_rotors = len(train_config.enigma_config.rotors)
 
-    if NGRAM:
+    if LOSS_MODE == "ngram":
         loss_fn = NgramLoss(load_ngram_logprobs(NGRAM_PATH, n_alphabet, device), tau=TAU).to(device)
+    elif LOSS_MODE == "transformer":
+        ckpt_paths = sorted(glob.glob(os.path.join(MODELS_DIR, "transformer_lm_*.pth")))
+        if not ckpt_paths:
+            raise FileNotFoundError(
+                f"No transformer_lm_*.pth found in {MODELS_DIR}. Run transformer/train.py first."
+            )
+        print(f"Loading transformer LM: {ckpt_paths[-1]}")
+        _lm = load_transformer_lm(ckpt_paths[-1], device)
+        loss_fn = TransformerLoss(_lm, tau=TAU)
     else:
         loss_fn = train_config.loss_fn
 
-    # ngram mode needs real English plaintext so a correct decryption scores high.
-    if NGRAM:
+    # Unsupervised modes need real English plaintext so a correct decryption scores high.
+    if UNSUPERVISED:
         with open(CORPUS_PATH, "r", encoding="utf-8") as f:
             corpus = "".join(ch for ch in f.read() if ch in learner.char_to_idx)
         if len(corpus) < 2 * LEN_STRING:
@@ -85,7 +97,7 @@ else:
 
         # Positions are known and fixed; the learner recovers the wiring.
         true_positions = [random.randint(0, n_alphabet - 1) for _ in range(n_rotors)]
-        print(f"Unsupervised (3gram) mode. Known start positions: {true_positions}")
+        print(f"Unsupervised ({LOSS_MODE}) mode. Known start positions: {true_positions}")
 
     print(f"Training QNet (batched), loss mode = {LOSS_MODE}...")
 
@@ -93,7 +105,7 @@ else:
         target = train_config.enigma_config.build()
         optimizer.zero_grad()
 
-        if NGRAM:
+        if UNSUPERVISED:
             # Encrypt real English, feed the ciphertext, score the decryption.
             # monitor_labels are the plaintext, used only for the readout.
             plaintext = sample_english(LEN_STRING)
@@ -124,10 +136,10 @@ else:
         optimizer.step()
 
         if step % LOG_STEP == 0:
-            if NGRAM:
+            if UNSUPERVISED:
                 with torch.no_grad():
                     acc = (predictions.argmax(dim=-1) == monitor_labels).float().mean().item()
-                print(f"step {step:>4d}, 3gram loss {loss.item():.4f}, monitor acc {acc:.3f}")
+                print(f"step {step:>4d}, {LOSS_MODE} loss {loss.item():.4f}, monitor acc {acc:.3f}")
             else:
                 print(f"step {step:>4d}, loss {loss.item():.4f}")
 

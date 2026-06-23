@@ -27,21 +27,21 @@ ALPHABET = CONFIG.alphabet
 
 LM = LMConfig(
     vocab_size=len(ALPHABET),
-    block_size=128,
-    n_layer=6,
+    block_size=512,
+    n_layer=12,
     n_head=8,
-    d_model=256,
+    d_model=512,
     dropout=0.1,
     tie_weights=True,
 )
 
-MAX_STEPS = 3000
-BATCH_SIZE = 64
+MAX_STEPS = 10_000
+BATCH_SIZE = 32
 LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 0.1
-WARMUP_STEPS = 100
+WARMUP_STEPS = 400
 GRAD_CLIP = 1.0
-EVAL_STEP = 250
+EVAL_STEP = 500
 EVAL_BATCHES = 20
 
 P_SOFT = 0.5            # fraction of batches trained on noised soft inputs

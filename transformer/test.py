@@ -16,7 +16,7 @@ from config.alphabet26 import alphabet26
 # English-like. The score is the exact quantity TransformerLoss feeds the q_net:
 # the mean next-character negative log-likelihood (nats/char).
 # ---------------------------------------------------------------------------
-STRING = "OOOOOOOOOOOOOO"
+STRING = "IWANTTOKNOWHOWITSGOING"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
