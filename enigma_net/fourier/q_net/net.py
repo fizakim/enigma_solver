@@ -53,6 +53,7 @@ class QNet(nn.Module):
         k = torch.arange(self.n, dtype=torch.float32)
         omega = torch.exp(-2j * torch.pi * k / self.n).to(torch.complex64)
         self.register_buffer('omega', omega)
+        self.register_buffer('k', k)
 
         self.rotors = nn.ModuleList([
             QRotor(
@@ -155,6 +156,57 @@ class QNet(nn.Module):
             u = self._apply_backward_rotors(u)
             cols.append((self.F_inv @ u).real.float())
         return torch.stack(cols, dim=1)
+
+    def encrypt_sequence(self, input_indices):
+        """Batched forward for a full sequence. Returns [T, n] float32 logits.
+
+        Precomputes all rotor positions from self.positions without side-effects,
+        then runs the entire sequence through F → rotors → reflector → F_inv in
+        one vectorised pass (no Python loop over characters).
+        """
+        T = len(input_indices)
+        device = self.F.device
+
+        # Precompute rotor positions at each of the T steps (local copy, no mutation)
+        positions = list(self.positions)
+        step_pos = torch.empty(T, self.num_rotors, dtype=torch.long, device=device)
+        for t in range(T):
+            for i in range(self.num_rotors - 1, -1, -1):
+                at_notch = (positions[i] == self.notches[i])
+                positions[i] = (positions[i] + 1) % self.n
+                if not at_notch:
+                    break
+            for r in range(self.num_rotors):
+                step_pos[t, r] = positions[r]
+
+        # Map each input char to its column of F → [T, n] complex
+        input_t = torch.tensor(input_indices, dtype=torch.long, device=device)
+        U = self.F[:, input_t].T  # [T, n]
+
+        # Forward rotors (reversed, matching _apply_forward_rotors)
+        for i in range(self.num_rotors - 1, -1, -1):
+            Q = self.rotors[i].get_Q()                         # [n, n]
+            phi = step_pos[:, i].float().unsqueeze(1)          # [T, 1]
+            phase = torch.exp(
+                -2j * torch.pi * self.k.unsqueeze(0) * phi / self.n
+            )                                                   # [T, n]
+            U = (phase * U) @ Q.T                              # [T, n]
+            U = phase.conj() * U
+
+        # Reflector
+        U = U @ self.reflector_fourier.T                       # [T, n]
+
+        # Backward rotors (forward order, matching _apply_backward_rotors)
+        for i in range(self.num_rotors):
+            Q = self.rotors[i].get_Q()                         # [n, n]
+            phi = step_pos[:, i].float().unsqueeze(1)          # [T, 1]
+            phase = torch.exp(
+                -2j * torch.pi * self.k.unsqueeze(0) * phi / self.n
+            )                                                   # [T, n]
+            U = (phase * U) @ Q.conj()                         # [T, n]
+            U = phase.conj() * U
+
+        return (U @ self.F_inv.T).real.float()                 # [T, n]
 
     def set_tau(self, tau):
         pass

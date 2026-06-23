@@ -1,5 +1,3 @@
-from config.alphabet26 import alphabet26
-from config.alphabet15 import alphabet15
 import sys
 import os
 import random
@@ -15,15 +13,18 @@ from visualiser import visualise_q_net
 from enigma_net import CrossEntropyLoss
 from enigma_net.train_config import TrainConfig
 from config.alphabet3 import alphabet3
-from config.alphabet5 import alphabet5#
+from config.alphabet5 import alphabet5
 from config.alphabet10 import alphabet10
 from config.alphabet15 import alphabet15
 from config.alphabet26 import alphabet26
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 LOAD_TARGET = False
 
 train_config = TrainConfig(
-    enigma_config=alphabet3,
+    enigma_config=alphabet26,
     loss_fn=CrossEntropyLoss(),
     trainable_rotors=None,
     trainable_reflector=False,
@@ -39,7 +40,7 @@ learner = QNet(
     load_target=LOAD_TARGET,
     trainable_rotors=train_config.trainable_rotors,
     trainable_reflector=train_config.trainable_reflector,
-)
+).to(device)
 
 models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "models"))
 os.makedirs(models_dir, exist_ok=True)
@@ -54,30 +55,26 @@ else:
     optimizer = torch.optim.Adam(learner.parameters(), lr=LEARNING_RATE)
     loss_fn = train_config.loss_fn
 
-    print("Training QNet...")
+    print("Training QNet (batched)...")
     n_alphabet = len(train_config.enigma_config.alphabet)
     n_rotors = len(train_config.enigma_config.rotors)
 
     for step in range(TOTAL_STEPS):
         positions = [random.randint(0, n_alphabet - 1) for _ in range(n_rotors)]
-        plaintext = "".join(random.choice(train_config.enigma_config.alphabet) for _ in range(LEN_STRING))
+        plaintext = [random.choice(train_config.enigma_config.alphabet) for _ in range(LEN_STRING)]
 
         target = train_config.enigma_config.build()
         target.reset(positions)
         learner.reset(positions)
         optimizer.zero_grad()
 
-        outputs = []
-        target_labels = []
-        for c in plaintext:
-            input_vec = torch.zeros(n_alphabet)
-            input_vec[learner.char_to_idx[c]] = 1.0
+        # Build input indices and target labels in one Python pass (no autograd needed)
+        input_indices = [learner.char_to_idx[c] for c in plaintext]
+        target_labels = [learner.char_to_idx[target.encrypt_char(c)] for c in plaintext]
 
-            target_labels.append(learner.char_to_idx[target.encrypt_char(c)])
-            outputs.append(learner(input_vec))
-
-        predictions = torch.stack(outputs)
-        targets = torch.tensor(target_labels, dtype=torch.long)
+        # Batched forward: [T, n] logits in a single vectorised pass
+        predictions = learner.encrypt_sequence(input_indices)
+        targets = torch.tensor(target_labels, dtype=torch.long, device=device)
         ce_loss = loss_fn(predictions, targets)
 
         ce_loss.backward()

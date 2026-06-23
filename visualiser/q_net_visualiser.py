@@ -37,7 +37,7 @@ def visualise_q_net(net, target_sim, position=None, show_numbers=True):
         tgt_Q_mag = np.abs(tgt_Q_fourier)
 
         with torch.no_grad():
-            lrn_spatial = net_rotor.get_spatial_matrix().numpy()
+            lrn_spatial = net_rotor.get_spatial_matrix().cpu().numpy()
             lrn_Q = net_rotor.get_Q().detach().cpu().numpy()
         lrn_Q_mag = np.abs(lrn_Q)
 
