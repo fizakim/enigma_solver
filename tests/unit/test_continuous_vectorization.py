@@ -7,7 +7,7 @@ import numpy as np
 import random
 from config.alphabet3 import alphabet3
 from config.alphabet5 import alphabet5
-from enigma_net.fourier.continuous.net import ContinuousQNet
+from enigma_net.fourier.continuous_q_net import ContinuousQNet
 
 # We implement the exact old implementation of forward and encrypt_sequence
 # to compare against our new vectorized & stabilized version.
@@ -15,14 +15,14 @@ def old_forward(net, v, step_offset):
     # v: shape (n,)
     # step_offset: shape (C, num_rotors)
     u = net.F @ v.to(net.F.dtype)
-    u = u.unsqueeze(0).expand(net.phi.shape[0], -1) # shape (C, n)
+    u = u.unsqueeze(0).expand(net.initial_positions.shape[0], -1) # shape (C, n)
     
     for i in range(net.num_rotors - 1, -1, -1):
         Q = net.rotors[i].get_Q()
         if Q.ndim == 2:
             Q = Q.unsqueeze(0)
         
-        phi_eff = net.phi[:, i] + step_offset[:, i].float()
+        phi_eff = step_offset[:, i].float()
         phase = net.omega ** phi_eff.unsqueeze(-1)
         u = phase * u
         u = torch.bmm(u.unsqueeze(1), Q.transpose(-2, -1)).squeeze(1)
@@ -35,7 +35,7 @@ def old_forward(net, v, step_offset):
         if Q.ndim == 2:
             Q = Q.unsqueeze(0)
             
-        phi_eff = net.phi[:, i] + step_offset[:, i].float()
+        phi_eff = step_offset[:, i].float()
         phase = net.omega ** phi_eff.unsqueeze(-1)
         u = phase * u
         u = torch.bmm(u.unsqueeze(1), Q.conj()).squeeze(1)
@@ -48,7 +48,7 @@ def old_encrypt_sequence(net, input_indices):
     step_offsets = net.precompute_steps(T)
     outputs = []
     for t in range(T):
-        v = torch.zeros(net.n, device=net.phi.device)
+        v = torch.zeros(net.n, device=net.initial_positions.device)
         v[input_indices[t]] = 1.0
         outputs.append(old_forward(net, v, step_offsets[t]))
     return torch.stack(outputs)

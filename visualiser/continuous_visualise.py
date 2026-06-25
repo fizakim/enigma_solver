@@ -5,49 +5,30 @@ import matplotlib.colors as mcolors
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 import torch
 
-
 def _dft_matrix(n):
     k = np.arange(n).reshape(n, 1)
     m = np.arange(n).reshape(1, n)
     return np.exp(-2j * np.pi * k * m / n) / np.sqrt(n)
 
-
 def _best_candidate(net):
-    """Return 0 — positions are fixed integers so any candidate is equally integer-like."""
     return 0
 
-
-# ---------------------------------------------------------------------------
-# Position-landscape section
-# ---------------------------------------------------------------------------
-
 def _draw_position_section(axes_row, net, true_positions):
-    """Fill the pre-created axes (one per rotor) with fixed-position histograms.
-
-    Each subplot shows how many candidates start at each integer position.
-    The selected (best) candidate's position is highlighted in blue; the true
-    initial position is marked with a gold dashed line.
-    """
     n = net.n
-    positions = net.initial_positions.cpu()  # [C, num_rotors], integer
+    positions = net.initial_positions.cpu()
     C = positions.shape[0]
     alphabet = net.config.alphabet
     best_c = _best_candidate(net)
 
     for r_idx, ax in enumerate(axes_row):
-        pos_r = positions[:, r_idx].numpy()   # [C] integer positions
-
-        # Count candidates per position
+        pos_r = positions[:, r_idx].numpy()
         counts = np.bincount(pos_r, minlength=n)
         bar_colors = ["steelblue"] * n
-
-        # Highlight the best candidate's position
         best_pos = int(pos_r[best_c])
         bar_colors[best_pos] = "deepskyblue"
 
         ax.bar(range(n), counts, color=bar_colors, edgecolor="black", linewidth=0.6, zorder=3)
 
-        # True position marker
         if true_positions is not None:
             tp = true_positions[r_idx]
             ax.axvline(tp, color="gold", linewidth=2.5, linestyle="--", zorder=4,
@@ -61,23 +42,12 @@ def _draw_position_section(axes_row, net, true_positions):
         ax.set_title(f"Rotor {r_idx}  initial positions", fontsize=10, weight="bold")
         ax.set_xlabel("position", fontsize=8)
 
-
-# ---------------------------------------------------------------------------
-# Wiring-analysis section  (mirrors q_net_visualiser layout)
-# ---------------------------------------------------------------------------
-
 def _draw_wiring_section(axes_grid, net, target_sim, best_c, show_numbers):
-    """Fill a (num_rotors+1) × 5 axes grid with Q-matrix analysis for candidate best_c.
-
-    Columns: Target (spatial) | Learned (spatial) | Argmax | Target |Q| | Learned |Q|
-    Rows: one per rotor, then the reflector.
-    """
     n = net.n
     alphabet = net.config.alphabet
     F_np = _dft_matrix(n)
     F_inv_np = F_np.conj().T
 
-    # ---- helpers ----
     def draw_numbers(ax, matrix, fmt="{:.2f}", threshold=0.5):
         for r in range(n):
             for c in range(n):
@@ -106,7 +76,6 @@ def _draw_wiring_section(axes_grid, net, target_sim, best_c, show_numbers):
         ax.grid(which="minor", color="#d3d3d3", linewidth=0.5)
         ax.grid(which="major", visible=False)
 
-    # Column headers on first row only
     col_titles = [
         "Target (spatial)", "Learned (spatial)", "Argmax",
         "Target |Q|", f"Learned |Q|  (c={best_c})",
@@ -114,7 +83,6 @@ def _draw_wiring_section(axes_grid, net, target_sim, best_c, show_numbers):
     for col_idx, title in enumerate(col_titles):
         axes_grid[0][col_idx].set_title(title, fontsize=10, weight="bold", pad=6)
 
-    # ---- rotors ----
     for row_idx, (net_rotor, tgt_rotor) in enumerate(
         zip(net.rotors, target_sim.rotors)
     ):
@@ -162,7 +130,6 @@ def _draw_wiring_section(axes_grid, net, target_sim, best_c, show_numbers):
             draw_numbers(ax3, tgt_Q_mag, threshold=0.5)
             draw_numbers(ax4, lrn_Q_mag, threshold=max_q * 0.5)
 
-    # ---- reflector ----
     ref_row = len(net.rotors)
     ax0, ax1, ax2, ax3, ax4 = axes_grid[ref_row]
 
@@ -205,11 +172,6 @@ def _draw_wiring_section(axes_grid, net, target_sim, best_c, show_numbers):
         draw_numbers(ax3, tgt_ref_mag, threshold=0.5)
         draw_numbers(ax4, lrn_ref_mag, threshold=max_q * 0.5)
 
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
 def visualise_continuous(
     net,
     target_sim,
@@ -217,49 +179,20 @@ def visualise_continuous(
     best_candidate_idx=None,
     show_numbers=True,
 ):
-    """Two-section visualisation for ContinuousQNet.
-
-    Top section — candidate positions:
-        One bar chart per rotor showing how many candidates start at each
-        integer position.  A gold dashed line marks the true initial position
-        when *true_positions* is supplied.
-
-    Bottom section — wiring quality:
-        Five-column Q-matrix analysis for a single candidate (candidate 0 by
-        default, or *best_candidate_idx* if given).
-        Columns: target spatial | learned spatial | argmax | target |Q| | learned |Q|.
-
-    Parameters
-    ----------
-    net : ContinuousQNet
-    target_sim : Enigma simulator (built from config.build())
-    true_positions : list[int] | None
-        True initial positions used during training.  When None the gold
-        reference line is omitted from the position chart.
-    best_candidate_idx : int | None
-        Which candidate to use for the wiring section.  Defaults to 0.
-    show_numbers : bool
-        Annotate matrix cells with their values.
-    """
     num_rotors = net.num_rotors
-    num_wiring_rows = num_rotors + 1  # rotors + reflector
+    num_wiring_rows = num_rotors + 1
 
     if best_candidate_idx is None:
         best_candidate_idx = _best_candidate(net)
 
-    # Step target_sim to match one encryption step from true_positions (or pos 0)
     step_from = true_positions if true_positions is not None else [0] * num_rotors
     target_sim.reset(step_from)
     for r in reversed(target_sim.rotors):
         if not r.step():
             break
 
-    # ---- figure layout ----
-    # Two vertically stacked sections with different column counts are handled
-    # via nested GridSpec: the outer grid defines vertical slices, the inner
-    # grids define columns within each slice.
-    pos_height = 2.8          # inches per position-landscape row (just 1 row)
-    wiring_height = 3.5       # inches per wiring row
+    pos_height = 2.8
+    wiring_height = 3.5
     total_height = pos_height + wiring_height * num_wiring_rows
 
     fig = plt.figure(figsize=(5 * 5, total_height))
@@ -275,7 +208,6 @@ def visualise_continuous(
         hspace=0.45,
     )
 
-    # Top: position landscape  (1 row × num_rotors cols)
     top_gs = GridSpecFromSubplotSpec(
         1, num_rotors,
         subplot_spec=outer[0],
@@ -283,7 +215,6 @@ def visualise_continuous(
     )
     pos_axes = [fig.add_subplot(top_gs[0, r]) for r in range(num_rotors)]
 
-    # Bottom: wiring analysis  (num_wiring_rows × 5 cols)
     bot_gs = GridSpecFromSubplotSpec(
         num_wiring_rows, 5,
         subplot_spec=outer[1],
