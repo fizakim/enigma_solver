@@ -12,6 +12,7 @@ class CausalSelfAttention(nn.Module):
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model)
         self.proj = nn.Linear(cfg.d_model, cfg.d_model)
         self.dropout = cfg.dropout
+        self.causal = getattr(cfg, "causal", True)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -20,7 +21,7 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.d_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.d_head).transpose(1, 2)
         y = F.scaled_dot_product_attention(
-            q, k, v, is_causal=True,
+            q, k, v, is_causal=self.causal,
             dropout_p=self.dropout if self.training else 0.0,
         )
         y = y.transpose(1, 2).contiguous().view(B, T, C)
@@ -93,7 +94,7 @@ class CharTransformer(nn.Module):
     def generate(self, idx, max_new_tokens, temperature=1.0, greedy=False):
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.cfg.block_size:]
-            logits = self(idx_cond)[:, -1, :] / max(temperature, 1e-6)
+            logits = self(idx_cond)[:, -1, :] / temperature
             probs = F.softmax(logits, dim=-1)
             nxt = probs.argmax(dim=-1, keepdim=True) if greedy else torch.multinomial(probs, 1)
             idx = torch.cat([idx, nxt], dim=1)

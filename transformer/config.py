@@ -9,6 +9,7 @@ class LMConfig:
     d_model: int = 256
     dropout: float = 0.1
     tie_weights: bool = True
+    causal: bool = True
 
     def to_dict(self):
         return asdict(self)

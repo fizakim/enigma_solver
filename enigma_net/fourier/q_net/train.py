@@ -8,20 +8,24 @@ from enigma_net.fourier.q_net import QNet
 from enigma_net.fourier.config import alphabet26_config
 from enigma_net import NgramLoss, load_ngram_logprobs
 from transformer.loss import load_transformer_lm, TransformerLoss
+from enigma_net.ce_approximator.model import load_ce_approximator
 from comparison.fourier_comparison import compare
 from visualiser import visualise_q_net
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-LOSS_MODE = "transformer"
+LOSS_MODE = "ce_approximator"
 LEARNING_RATE = 0.01
-TOTAL_STEPS = 250
+TOTAL_STEPS = 500
 TAU = 0.5
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 NGRAM_PATH = os.path.join(_ROOT, "language", "ngram", "3grams.pth")
 CORPUS_PATH = os.path.join(_ROOT, "language", "fineweb", "fineweb.txt")
 MODELS_DIR = os.path.join(_ROOT, "models")
+CE_APPROX_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "ce_approximator", "models")
+)
 
 config = alphabet26_config.enigma_config
 n = len(config.alphabet)
@@ -35,13 +39,16 @@ learner = QNet(
     trainable_reflector=alphabet26_config.trainable_reflector,
 ).to(device)
 
-UNSUPERVISED = LOSS_MODE in ("ngram", "transformer")
+UNSUPERVISED = LOSS_MODE in ("ngram", "transformer", "ce_approximator")
 
 if LOSS_MODE == "ngram":
     loss_fn = NgramLoss(load_ngram_logprobs(NGRAM_PATH, n, device), tau=TAU).to(device)
 elif LOSS_MODE == "transformer":
     ckpt_paths = sorted(glob.glob(os.path.join(MODELS_DIR, "transformer_lm_*.pth")))
     loss_fn = TransformerLoss(load_transformer_lm(ckpt_paths[-1], device), tau=TAU)
+elif LOSS_MODE == "ce_approximator":
+    _ce_ckpts = sorted(glob.glob(os.path.join(CE_APPROX_DIR, "ce_approximator_*.pth")))
+    loss_fn = load_ce_approximator(_ce_ckpts[-1], device=str(device))
 else:
     loss_fn = alphabet26_config.loss_fn
 
