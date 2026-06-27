@@ -1,27 +1,4 @@
-"""CE approximator built as a plaintext denoiser.
-
-The approximator estimates the true cross-entropy of a Q-Net's output against the
-(unknown) plaintext, and — critically — produces a gradient that points each output
-position at its *specific* true character rather than at a generic English prior.
-
-Construction
-------------
-Let ``d = softmax(logits / tau)`` be the Q-Net's soft output. A denoiser ``D`` predicts,
-per position, a distribution ``q = D(d)`` over the true plaintext character. With ``q``
-detached, the surrogate loss
-
-    CE_pred = -(1/T) * sum_t sum_c q_t[c] * log d_t[c]
-
-has gradient ``(d_t - q_t) / (T * tau)`` w.r.t. the logits — the exact functional form of
-the true-CE gradient ``(d_t - onehot(y_t)) / T``, with ``q_t`` standing in for the unknown
-``onehot(y_t)``. When ``D`` recovers the plaintext, both the value and the gradient of
-CE_pred equal true CE.
-
-Unlike the n-gram / transformer losses (valid only at exact rotor configs, misleading on the
-soft-permutation blurs the optimizer actually visits), ``D`` reads the soft output directly
-and is trained to map soft blurs to the true character — so its gradient stays honest across
-the whole optimization trajectory.
-"""
+from dataclasses import asdict, dataclass
 
 import torch
 import torch.nn as nn
@@ -31,110 +8,154 @@ from transformer.config import LMConfig
 from transformer.model import CharTransformer
 
 
+@dataclass
+class DenoiserFeatures:
+    use_cipher: bool = True
+    use_positions: bool = True
+    use_state: bool = True
+    use_lm_prior: bool = False
+    num_rotors: int = 3
+    n: int = 26
+
+
 class PlaintextDenoiser(nn.Module):
-    """Bidirectional transformer that maps a soft Q-Net output sequence to per-position
-    logits over the true plaintext character.
-
-    Reuses ``CharTransformer`` (whose ``embed`` already accepts soft distributions via
-    ``x @ tok_emb.weight``) in non-causal mode so that output position ``t`` can attend to
-    its own input ``d_t`` and both-side context.
-    """
-
-    def __init__(self, cfg: LMConfig):
+    def __init__(self, cfg: LMConfig, feats: DenoiserFeatures = None):
         super().__init__()
         self.cfg = cfg
+        self.feats = feats or DenoiserFeatures()
         self.transformer = CharTransformer(cfg)
 
-    def forward(self, d):
-        """d: [B, L, n] soft distribution  ->  logits: [B, L, n]"""
-        return self.transformer(d)
+        d_model = cfg.d_model
+        if self.feats.use_cipher:
+            self.cipher_emb = nn.Embedding(self.feats.n, d_model)
+            nn.init.zeros_(self.cipher_emb.weight)
+        if self.feats.use_positions:
+            self.rotor_pos_emb = nn.ModuleList(
+                [nn.Embedding(self.feats.n, d_model) for _ in range(self.feats.num_rotors)]
+            )
+            for emb in self.rotor_pos_emb:
+                nn.init.zeros_(emb.weight)
+        if self.feats.use_lm_prior:
+            self.prior_proj = nn.Linear(self.feats.n, d_model)
+            nn.init.zeros_(self.prior_proj.weight)
+            nn.init.zeros_(self.prior_proj.bias)
+        if self.feats.use_state:
+            cond_dim = self.feats.num_rotors + 1
+            self.film = nn.Sequential(
+                nn.Linear(cond_dim, d_model),
+                nn.GELU(),
+                nn.Linear(d_model, 2 * d_model),
+            )
+            nn.init.zeros_(self.film[-1].weight)
+            nn.init.zeros_(self.film[-1].bias)
+
+    @staticmethod
+    def _entropy(d, eps=1e-9):
+        return -(d * d.clamp_min(eps).log()).sum(-1).mean(-1, keepdim=True)
+
+    def forward(self, d, cipher=None, positions=None, qnet_state=None, prior=None):
+        h = self.transformer.embed(d)
+        if self.feats.use_cipher and cipher is not None:
+            h = h + self.cipher_emb(cipher)
+        if self.feats.use_positions and positions is not None:
+            for r, emb in enumerate(self.rotor_pos_emb):
+                h = h + emb(positions[..., r])
+        if self.feats.use_lm_prior and prior is not None:
+            h = h + self.prior_proj(prior)
+        if self.feats.use_state and qnet_state is not None:
+            cond = torch.cat([qnet_state, self._entropy(d)], dim=-1)
+            gamma, beta = self.film(cond).chunk(2, dim=-1)
+            h = h * (1.0 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
+        return self.transformer.forward_from_embeddings(h)
 
     @classmethod
-    def from_pretrained_lm(cls, lm_ckpt_path, device="cpu", dropout=None):
-        """Warm-start from a pretrained (causal) language model checkpoint.
-
-        The weights are shape-compatible; only the attention mask differs. Inheriting the
-        LM's English structure bootstraps the denoiser.
-        """
+    def from_pretrained_lm(cls, lm_ckpt_path, feats: DenoiserFeatures = None,
+                           device="cpu", dropout=None):
         ckpt = torch.load(lm_ckpt_path, map_location="cpu")
         cfg = LMConfig.from_dict(ckpt["config"])
         cfg.causal = False
         if dropout is not None:
             cfg.dropout = dropout
-        model = cls(cfg)
+        model = cls(cfg, feats)
         model.transformer.load_state_dict(ckpt["model"])
         return model.to(device)
 
 
 class CEApproximator(LossFunction):
-    """Differentiable cross-entropy surrogate: ``CE_pred = CE(d, stopgrad(D(d)))``.
-
-    Drop-in replacement for NgramLoss / TransformerLoss. Long sequences are processed in
-    ``block_size`` windows (the denoiser's context length); windows are non-overlapping and
-    cover every position exactly once.
-    """
-
     requires_full_sequence = True
 
     def __init__(self, denoiser: PlaintextDenoiser, tau=0.5, block_size=None,
-                 win_batch=256, eps=1e-9):
+                 win_batch=256, eps=1e-9, prior_lm: CharTransformer = None):
         super().__init__()
         self.denoiser = denoiser
         self.tau = tau
         self.block_size = block_size or denoiser.cfg.block_size
         self.win_batch = win_batch
         self.eps = eps
+        self.prior_lm = prior_lm
 
     def set_tau(self, tau):
         self.tau = tau
 
-    def _run_denoiser(self, x):
-        """x: [M, L, n] windows -> q: [M, L, n] predicted target distributions."""
+    def _window_prior(self, d):
+        if not (self.denoiser.feats.use_lm_prior and self.prior_lm is not None):
+            return None
+        with torch.no_grad():
+            return torch.softmax(self.prior_lm(d), dim=-1)
+
+    def _run_denoiser(self, d, cipher, positions, qnet_state, prior):
         outs = []
-        for s in range(0, x.shape[0], self.win_batch):
-            logits = self.denoiser(x[s:s + self.win_batch])
+        for s in range(0, d.shape[0], self.win_batch):
+            sl = slice(s, s + self.win_batch)
+            logits = self.denoiser(
+                d[sl],
+                cipher[sl] if cipher is not None else None,
+                positions[sl] if positions is not None else None,
+                qnet_state[sl] if qnet_state is not None else None,
+                prior[sl] if prior is not None else None,
+            )
             outs.append(torch.softmax(logits, dim=-1))
         return torch.cat(outs, dim=0)
 
-    def _denoise(self, d):
-        """d: [B, T, n] -> q: [B, T, n], applying the denoiser over block_size windows."""
+    def _denoise(self, d, cipher=None, positions=None, qnet_state=None):
         B, T, n = d.shape
         bs = self.block_size
         n_full = T // bs
         parts = []
         if n_full > 0:
-            main = d[:, :n_full * bs, :].reshape(B * n_full, bs, n)
-            q_main = self._run_denoiser(main).reshape(B, n_full * bs, n)
-            parts.append(q_main)
+            L = n_full * bs
+            md = d[:, :L, :].reshape(B * n_full, bs, n)
+            mc = cipher[:, :L].reshape(B * n_full, bs) if cipher is not None else None
+            mp = positions[:, :L, :].reshape(B * n_full, bs, positions.shape[-1]) if positions is not None else None
+            ms = qnet_state.repeat_interleave(n_full, dim=0) if qnet_state is not None else None
+            q = self._run_denoiser(md, mc, mp, ms, self._window_prior(md)).reshape(B, L, n)
+            parts.append(q)
         if T - n_full * bs > 0:
-            tail = d[:, n_full * bs:, :]
-            parts.append(self._run_denoiser(tail))
+            o = n_full * bs
+            td = d[:, o:, :]
+            tc = cipher[:, o:] if cipher is not None else None
+            tp = positions[:, o:, :] if positions is not None else None
+            parts.append(self._run_denoiser(td, tc, tp, qnet_state, self._window_prior(td)))
         return torch.cat(parts, dim=1)
 
-    def predict_target(self, logits):
-        """Return the (detached) predicted target distribution q for given logits.
-
-        Exposed for diagnostics (recovery accuracy, gradient checks).
-        """
+    def predict_target(self, logits, cipher=None, positions=None, qnet_state=None):
         d = torch.softmax(logits / self.tau, dim=-1)
         with torch.no_grad():
-            return self._denoise(d)
+            return self._denoise(d, cipher, positions, qnet_state)
 
-    def forward(self, logits, targets=None):
-        """logits: [B, T, n]  ->  ce_estimate: [B]"""
+    def forward(self, logits, targets=None, cipher=None, positions=None, qnet_state=None):
         d = torch.softmax(logits / self.tau, dim=-1)
-        # q is a fixed target: build it without autograd so no gradient flows through the
-        # denoiser. The only gradient path is through log(d), giving (d - q) / (T * tau).
         with torch.no_grad():
-            q = self._denoise(d)
+            q = self._denoise(d, cipher, positions, qnet_state)
         log_d = torch.log(d.clamp_min(self.eps))
         return -(q * log_d).sum(-1).mean(-1)
 
 
 def save_ce_approximator(approximator: CEApproximator, path: str) -> None:
     torch.save({
-        "denoiser": approximator.denoiser.transformer.state_dict(),
+        "denoiser": approximator.denoiser.state_dict(),
         "lm_config": approximator.denoiser.cfg.to_dict(),
+        "feats": asdict(approximator.denoiser.feats),
         "tau": approximator.tau,
         "block_size": approximator.block_size,
     }, path)
@@ -144,8 +165,16 @@ def load_ce_approximator(path: str, device: str = "cpu") -> CEApproximator:
     ckpt = torch.load(path, map_location=device)
     cfg = LMConfig.from_dict(ckpt["lm_config"])
     cfg.causal = False
-    denoiser = PlaintextDenoiser(cfg)
-    denoiser.transformer.load_state_dict(ckpt["denoiser"])
+    if "feats" in ckpt:
+        valid = DenoiserFeatures.__dataclass_fields__
+        feats = DenoiserFeatures(**{k: v for k, v in ckpt["feats"].items() if k in valid})
+        denoiser = PlaintextDenoiser(cfg, feats)
+        denoiser.load_state_dict(ckpt["denoiser"])
+    else:
+        feats = DenoiserFeatures(use_cipher=False, use_positions=False,
+                                 use_state=False, use_lm_prior=False)
+        denoiser = PlaintextDenoiser(cfg, feats)
+        denoiser.transformer.load_state_dict(ckpt["denoiser"])
     approx = CEApproximator(
         denoiser, tau=ckpt["tau"], block_size=ckpt["block_size"],
     ).to(device)

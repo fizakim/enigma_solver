@@ -1,16 +1,3 @@
-"""Evaluate a trained CE approximator (plaintext denoiser).
-
-Reports, binned by permutation hardness (the soft-permutation continuum the optimizer
-actually traverses):
-  * denoiser plaintext-recovery accuracy
-  * value calibration of CE_pred vs true CE (MSE / MAE / Pearson / Spearman)
-  * gradient alignment: cosine(grad CE_pred, grad true_CE), compared head-to-head against
-    the transformer-loss and n-gram-loss gradients on the same windows. The redesign must
-    stay aligned across the soft bins where those baselines go misleading.
-
-    python -m enigma_net.ce_approximator.test [--ckpt path]
-"""
-
 import argparse
 import glob
 import os
@@ -20,6 +7,7 @@ import torch.nn.functional as F
 
 from enigma_net.ce_approximator.data_gen import generate_dataset
 from enigma_net.ce_approximator.model import load_ce_approximator
+from enigma_net.ce_approximator.train import downstream_accuracy
 from enigma_net.fourier.config import alphabet26_config
 from enigma_net.ngram import NgramLoss, load_ngram_logprobs
 from transformer.loss import TransformerLoss, load_transformer_lm
@@ -47,7 +35,6 @@ def spearman(x, y):
 
 
 def _grad_wrt_logits(loss_scalar_per_window, logits):
-    """Return per-window gradient [B, L, n] of summed per-window loss."""
     g, = torch.autograd.grad(loss_scalar_per_window.sum(), logits, retain_graph=False)
     return g
 
@@ -58,7 +45,6 @@ def _cos(g, g_true):
 
 
 def per_bin_report(name, values, axis, n_bins):
-    """Report `values` averaged within equal-count quantile bins of the true-CE `axis`."""
     edges = torch.quantile(axis, torch.linspace(0.0, 1.0, n_bins + 1))
     idx = torch.bucketize(axis, edges[1:-1].contiguous())
     print(f"\n{name} by true-CE level (high = sharp-wrong .. mid = soft blur .. low = solved):")
@@ -87,13 +73,12 @@ def main():
     tau = approx.tau
     block_size = approx.block_size
 
-    # Baselines for the gradient-alignment comparison
     ngram_loss = NgramLoss(load_ngram_logprobs(NGRAM_PATH, n, device), tau=tau).to(device)
     lm_paths = sorted(glob.glob(os.path.join(LM_DIR, "transformer_lm_*.pth")))
     tf_loss = TransformerLoss(load_transformer_lm(lm_paths[-1], device), tau=tau)
 
     print("\nGenerating held-out evaluation windows...")
-    X, Y, CEW = generate_dataset(
+    X, Y, C, P, S, CEW = generate_dataset(
         config, corpus, char_to_idx, device,
         block_size=block_size, windows_per_candidate=4,
         n_random=100, n_traj=40, traj_snapshots=8, n_near=100, n_adv=100,
@@ -106,23 +91,24 @@ def main():
     for s in range(0, len(X), B):
         xb = X[s:s + B].to(device)
         yb = Y[s:s + B].to(device)
+        cb = C[s:s + B].to(device)
+        pb = P[s:s + B].to(device)
+        sb = S[s:s + B].to(device)
 
-        # recovery + value (no grad)
         with torch.no_grad():
-            q = approx.predict_target(xb)
+            q = approx.predict_target(xb, cb, pb, sb)
             rec.append((q.argmax(-1) == yb).float().mean(dim=1).cpu())
-            ce_pred.append(approx(xb).cpu())
+            ce_pred.append(approx(xb, cipher=cb, positions=pb, qnet_state=sb).cpu())
             ce_true.append(F.cross_entropy(
                 xb.reshape(-1, n), yb.reshape(-1), reduction="none"
             ).reshape(xb.shape[0], -1).mean(1).cpu())
 
-        # gradient alignment (needs autograd): true CE vs CE_pred / transformer / ngram
         lg = xb.detach().requires_grad_(True)
         ce_per = F.cross_entropy(lg.reshape(-1, n), yb.reshape(-1), reduction="none").reshape(lg.shape[0], -1).mean(1)
         g_true = _grad_wrt_logits(ce_per, lg)
 
         lg = xb.detach().requires_grad_(True)
-        g_ce = _grad_wrt_logits(approx(lg), lg)
+        g_ce = _grad_wrt_logits(approx(lg, cipher=cb, positions=pb, qnet_state=sb), lg)
         lg = xb.detach().requires_grad_(True)
         g_tf = _grad_wrt_logits(tf_loss(lg), lg)
         lg = xb.detach().requires_grad_(True)
@@ -150,6 +136,15 @@ def main():
     per_bin_report("CE_approx grad cosine", cos_ce, CEW, N_CE_BINS)
     per_bin_report("transformer grad cosine", cos_tf, CEW, N_CE_BINS)
     per_bin_report("ngram grad cosine", cos_ng, CEW, N_CE_BINS)
+
+    print("\n=== Downstream short-attack (fresh random keys) ===")
+    runs = [
+        downstream_accuracy(approx.denoiser, config, corpus, char_to_idx, tau, block_size, n,
+                            steps=200, lr=1e-3, seq_len=block_size * 8)
+        for _ in range(3)
+    ]
+    print(f"  mean monitor accuracy over {len(runs)} runs: {sum(runs) / len(runs):.4f}  "
+          f"(runs: {[round(a, 3) for a in runs]})")
 
 
 if __name__ == "__main__":

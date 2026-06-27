@@ -82,9 +82,12 @@ class CharTransformer(nn.Module):
         return x @ self.tok_emb.weight
 
     def forward(self, x):
-        T = x.shape[1]
-        pos = torch.arange(T, device=x.device)
-        h = self.drop(self.embed(x) + self.pos_emb(pos))
+        return self.forward_from_embeddings(self.embed(x))
+
+    def forward_from_embeddings(self, h):
+        T = h.shape[1]
+        pos = torch.arange(T, device=h.device)
+        h = self.drop(h + self.pos_emb(pos))
         for block in self.blocks:
             h = block(h)
         h = self.ln_f(h)

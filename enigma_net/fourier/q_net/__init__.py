@@ -105,6 +105,28 @@ class QNet(nn.Module):
     def get_spatial_matrix(self, rotor_idx):
         return self.rotors[rotor_idx].get_spatial_matrix()
 
+    def step_positions(self, T):
+        device = self.F.device
+        positions = list(self.positions)
+        step_pos = torch.empty(T, self.num_rotors, dtype=torch.long, device=device)
+        for t in range(T):
+            for i in range(self.num_rotors - 1, -1, -1):
+                at_notch = (positions[i] == self.notches[i])
+                positions[i] = (positions[i] + 1) % self.n
+                if not at_notch:
+                    break
+            for r in range(self.num_rotors):
+                step_pos[t, r] = positions[r]
+        return step_pos
+
+    @torch.no_grad()
+    def state_features(self):
+        scores = []
+        for rotor in self.rotors:
+            M = rotor.get_spatial_matrix().abs()
+            scores.append(M.max(dim=0).values.mean())
+        return torch.stack(scores).clamp(0.0, 1.0)
+
     def _apply_forward_rotors(self, u):
         for rotor, pos in zip(reversed(self.rotors), reversed(self.positions)):
             Q = rotor.get_Q()
@@ -151,16 +173,7 @@ class QNet(nn.Module):
         T = len(input_indices)
         device = self.F.device
 
-        positions = list(self.positions)
-        step_pos = torch.empty(T, self.num_rotors, dtype=torch.long, device=device)
-        for t in range(T):
-            for i in range(self.num_rotors - 1, -1, -1):
-                at_notch = (positions[i] == self.notches[i])
-                positions[i] = (positions[i] + 1) % self.n
-                if not at_notch:
-                    break
-            for r in range(self.num_rotors):
-                step_pos[t, r] = positions[r]
+        step_pos = self.step_positions(T)
 
         input_t = torch.tensor(input_indices, dtype=torch.long, device=device)
         U = self.F[:, input_t].T

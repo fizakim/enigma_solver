@@ -15,8 +15,8 @@ from visualiser import visualise_q_net
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 LOSS_MODE = "ce_approximator"
-LEARNING_RATE = 0.01
-TOTAL_STEPS = 500
+LEARNING_RATE = 0.001
+TOTAL_STEPS = 2500
 TAU = 0.5
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -79,7 +79,16 @@ for step in range(TOTAL_STEPS):
         )
 
         predictions = learner.encrypt_sequence(input_indices)
-        loss = loss_fn(predictions.unsqueeze(0)).mean()
+        if LOSS_MODE == "ce_approximator":
+            cipher_t = torch.tensor(input_indices, dtype=torch.long, device=device).unsqueeze(0)
+            positions_t = learner.step_positions(len(input_indices)).unsqueeze(0)
+            state_t = learner.state_features().unsqueeze(0)
+            loss = loss_fn(
+                predictions.unsqueeze(0),
+                cipher=cipher_t, positions=positions_t, qnet_state=state_t,
+            ).mean()
+        else:
+            loss = loss_fn(predictions.unsqueeze(0)).mean()
     else:
         positions = [random.randint(0, n - 1) for _ in range(num_rotors)]
         plaintext = [random.choice(config.alphabet) for _ in range(LEN_STRING)]
