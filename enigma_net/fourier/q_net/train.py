@@ -16,12 +16,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 LOSS_MODE = "ce_approximator"
 LEARNING_RATE = 0.001
-TOTAL_STEPS = 2000
+TOTAL_STEPS = 1000
 TAU = 0.5
 
 # ce_approximator attack-side robustness
-TAU_ANNEAL = (0.8, 0.4)   # soft (smooth landscape, find the basin) -> sharp (precise) over training
-USE_EMA_TARGET = False    # mean-teacher target; only coherent when cipher is fixed across steps
+TAU_ANNEAL = (0.8, 0.4)
+USE_EMA_TARGET = False
 EMA_M = 0.9
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -86,7 +86,6 @@ for step in range(TOTAL_STEPS):
 
         predictions = learner.encrypt_sequence(input_indices)
         if LOSS_MODE == "ce_approximator":
-            # tau anneal: soft (smooth landscape, find the basin) -> sharp (precise).
             frac = step / max(1, TOTAL_STEPS - 1)
             loss_fn.set_tau(TAU_ANNEAL[0] + (TAU_ANNEAL[1] - TAU_ANNEAL[0]) * frac)
 
@@ -98,7 +97,6 @@ for step in range(TOTAL_STEPS):
                 cipher=cipher_t, positions=positions_t, qnet_state=state_t,
             )
             if USE_EMA_TARGET:
-                # NOTE: only coherent if the plaintext/cipher is fixed across steps.
                 ema_q = q if ema_q is None else EMA_M * ema_q + (1 - EMA_M) * q
                 q = ema_q
             loss = loss_fn.loss_with_target(predictions.unsqueeze(0), q).mean()

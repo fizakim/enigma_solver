@@ -46,12 +46,16 @@ USE_POSITIONS = True
 USE_STATE     = True
 USE_LM_PRIOR  = False
 
+BLOCK_SIZE_OVERRIDE = 256
+
 DAGGER_ROUNDS         = 2
 ONPOLICY_CANDIDATES   = 120
 ONPOLICY_ATTACK_STEPS = 150
 ONPOLICY_ATTACK_LR    = 1e-3
 ONPOLICY_SNAPSHOTS    = 6
 
+CALIBRATE     = False
+LABEL_SMOOTH  = 0.05
 CALIB_C0   = 2.6
 CALIB_CMAX = 3.2585
 LAMBDA_SMOOTH = 0.0
@@ -95,6 +99,13 @@ def calibrated_target(y, ce, prior, n, c0=CALIB_C0, cmax=CALIB_CMAX):
     oh = F.one_hot(y, n).float()
     alpha = ((ce - c0) / max(cmax - c0, 1e-6)).clamp(0.0, 1.0).view(-1, 1, 1)
     return (1.0 - alpha) * oh + alpha * prior.view(1, 1, -1)
+
+
+def make_target(y, ce, prior, n):
+    if CALIBRATE:
+        return calibrated_target(y, ce, prior, n)
+    oh = F.one_hot(y, n).float()
+    return (1.0 - LABEL_SMOOTH) * oh + LABEL_SMOOTH / n
 
 
 @torch.no_grad()
@@ -202,7 +213,7 @@ def train_round(denoiser, prior, train_loader, val_loader, config, corpus, char_
             tau_b = random.uniform(*TAU_AUG)
             d = torch.softmax(xb / tau_b, dim=-1)
             pred = denoiser(d, cb, pb, sb)
-            tgt = calibrated_target(yb, ceb, prior, n)
+            tgt = make_target(yb, ceb, prior, n)
             loss = -(tgt * F.log_softmax(pred, dim=-1)).sum(-1).mean()
             if LAMBDA_GRADCOS > 0:
                 q = torch.softmax(pred, dim=-1)
@@ -263,8 +274,10 @@ def main():
     if not lm_paths:
         raise FileNotFoundError(f"No transformer LM checkpoint found in {LM_DIR}")
     print(f"Warm-starting denoiser from {lm_paths[-1]}  | features={feats}")
-    denoiser = PlaintextDenoiser.from_pretrained_lm(lm_paths[-1], feats, device, dropout=DROPOUT)
+    denoiser = PlaintextDenoiser.from_pretrained_lm(
+        lm_paths[-1], feats, device, dropout=DROPOUT, block_size=BLOCK_SIZE_OVERRIDE)
     block_size = denoiser.cfg.block_size
+    print(f"Denoiser context (block_size) = {block_size}")
 
     X, Y, C, P, S, CE = generate_dataset(
         config, corpus, char_to_idx, device,

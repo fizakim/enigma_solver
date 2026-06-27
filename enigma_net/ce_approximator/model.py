@@ -72,14 +72,25 @@ class PlaintextDenoiser(nn.Module):
 
     @classmethod
     def from_pretrained_lm(cls, lm_ckpt_path, feats: DenoiserFeatures = None,
-                           device="cpu", dropout=None):
+                           device="cpu", dropout=None, block_size=None):
         ckpt = torch.load(lm_ckpt_path, map_location="cpu")
         cfg = LMConfig.from_dict(ckpt["config"])
         cfg.causal = False
         if dropout is not None:
             cfg.dropout = dropout
+        orig_bs = cfg.block_size
+        if block_size is not None and block_size != orig_bs:
+            cfg.block_size = block_size
         model = cls(cfg, feats)
-        model.transformer.load_state_dict(ckpt["model"])
+        lm_state = dict(ckpt["model"])
+        if cfg.block_size != orig_bs:
+            old_pos = lm_state.pop("pos_emb.weight")
+            model.transformer.load_state_dict(lm_state, strict=False)
+            with torch.no_grad():
+                keep = min(orig_bs, cfg.block_size)
+                model.transformer.pos_emb.weight[:keep].copy_(old_pos[:keep])
+        else:
+            model.transformer.load_state_dict(lm_state)
         return model.to(device)
 
 
@@ -172,16 +183,9 @@ def load_ce_approximator(path: str, device: str = "cpu") -> CEApproximator:
     ckpt = torch.load(path, map_location=device)
     cfg = LMConfig.from_dict(ckpt["lm_config"])
     cfg.causal = False
-    if "feats" in ckpt:
-        valid = DenoiserFeatures.__dataclass_fields__
-        feats = DenoiserFeatures(**{k: v for k, v in ckpt["feats"].items() if k in valid})
-        denoiser = PlaintextDenoiser(cfg, feats)
-        denoiser.load_state_dict(ckpt["denoiser"])
-    else:
-        feats = DenoiserFeatures(use_cipher=False, use_positions=False,
-                                 use_state=False, use_lm_prior=False)
-        denoiser = PlaintextDenoiser(cfg, feats)
-        denoiser.transformer.load_state_dict(ckpt["denoiser"])
+    feats = DenoiserFeatures(**ckpt["feats"])
+    denoiser = PlaintextDenoiser(cfg, feats)
+    denoiser.load_state_dict(ckpt["denoiser"])
     approx = CEApproximator(
         denoiser, tau=ckpt["tau"], block_size=ckpt["block_size"],
     ).to(device)
