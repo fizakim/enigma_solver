@@ -20,6 +20,8 @@ LM_DIR      = os.path.join(_ROOT, "models")
 MODELS_DIR  = os.path.join(_CE_DIR, "models")
 
 N_CE_BINS = 8
+REC_THRESH = 0.5     # a window is "wrong" if denoiser recovery is below this
+GAP_THRESH = 0.15    # a window is a "near-fixed-point" if mean ||d - q|| is below this
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -84,7 +86,7 @@ def main():
         n_random=100, n_traj=40, traj_snapshots=8, n_near=100, n_adv=100,
     )
 
-    rec, ce_pred, ce_true = [], [], []
+    rec, ce_pred, ce_true, gaps = [], [], [], []
     cos_ce, cos_tf, cos_ng = [], [], []
 
     B = 32
@@ -102,6 +104,8 @@ def main():
             ce_true.append(F.cross_entropy(
                 xb.reshape(-1, n), yb.reshape(-1), reduction="none"
             ).reshape(xb.shape[0], -1).mean(1).cpu())
+            d = torch.softmax(xb / tau, dim=-1)
+            gaps.append((d - q).norm(dim=-1).mean(dim=1).cpu())
 
         lg = xb.detach().requires_grad_(True)
         ce_per = F.cross_entropy(lg.reshape(-1, n), yb.reshape(-1), reduction="none").reshape(lg.shape[0], -1).mean(1)
@@ -121,18 +125,30 @@ def main():
     rec     = torch.cat(rec)
     ce_pred = torch.cat(ce_pred)
     ce_true = torch.cat(ce_true)
+    gaps    = torch.cat(gaps)
     cos_ce  = torch.cat(cos_ce)
     cos_tf  = torch.cat(cos_tf)
     cos_ng  = torch.cat(cos_ng)
+
+    wrong = rec < REC_THRESH
+    near_fixed = gaps < GAP_THRESH
+    fm_indicator = (wrong & near_fixed).float()
+    fm_rate = float(fm_indicator.sum() / wrong.float().sum().clamp(min=1.0))
 
     print("\n=== Overall ===")
     print(f"  recovery accuracy : {rec.mean():.4f}")
     print(f"  value  MSE={F.mse_loss(ce_pred, ce_true):.4f}  MAE={(ce_pred-ce_true).abs().mean():.4f}  "
           f"Pearson={pearson(ce_pred, ce_true):.4f}  Spearman={spearman(ce_pred, ce_true):.4f}")
+    print(f"  monotonicity Spearman :  loss vs true-CE={spearman(ce_pred, ce_true):+.4f}  "
+          f"loss vs recovery={spearman(ce_pred, rec):+.4f} (want strongly negative)")
     print(f"  grad cosine vs true-CE :  CE_approx={cos_ce.mean():+.4f}  "
           f"transformer={cos_tf.mean():+.4f}  ngram={cos_ng.mean():+.4f}")
+    print(f"  FALSE-MINIMUM rate (wrong & near-fixed ||d-q||<{GAP_THRESH}): {fm_rate:.4f}"
+          f"  | mean gap={gaps.mean():.4f}")
 
     per_bin_report("Recovery accuracy", rec, CEW, N_CE_BINS)
+    per_bin_report("Fixed-point gap ||d-q||", gaps, CEW, N_CE_BINS)
+    per_bin_report("False-minimum rate", fm_indicator, CEW, N_CE_BINS)
     per_bin_report("CE_approx grad cosine", cos_ce, CEW, N_CE_BINS)
     per_bin_report("transformer grad cosine", cos_tf, CEW, N_CE_BINS)
     per_bin_report("ngram grad cosine", cos_ng, CEW, N_CE_BINS)

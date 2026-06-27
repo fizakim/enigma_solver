@@ -1,9 +1,19 @@
 import random
+from collections import Counter
 
 import torch
 import torch.nn.functional as F
 
 from enigma_net.fourier.q_net import QNet
+
+
+def corpus_unigram_prior(corpus, char_to_idx, device, eps=1e-6):
+    n = len(char_to_idx)
+    counts = torch.full((n,), eps)
+    for ch, k in Counter(corpus).items():
+        if ch in char_to_idx:
+            counts[char_to_idx[ch]] += k
+    return (counts / counts.sum()).to(device)
 
 
 def make_random_qnet(config, device):
@@ -174,4 +184,70 @@ def generate_dataset(
     CE = torch.cat(CEs, dim=0)
     print(f"Dataset complete: {len(X)} windows  (block_size={block_size})  "
           f"true CE range {CE.min():.2f}..{CE.max():.2f}")
+    return X, Y, C, P, S, CE
+
+
+def generate_onpolicy_candidates(
+    approx, config, corpus, char_to_idx, device,
+    block_size: int = 128,
+    windows_per_candidate: int = 8,
+    n_candidates: int = 120,
+    attack_steps: int = 150,
+    attack_lr: float = 1e-3,
+    snapshots: int = 6,
+):
+    n_rotors = len(config.rotors)
+    seq_len = block_size * windows_per_candidate
+
+    was_training = approx.denoiser.training
+    approx.denoiser.eval()
+
+    snap_at = sorted(set(
+        round(i * attack_steps / (snapshots - 1)) for i in range(snapshots)
+    )) if snapshots > 1 else [attack_steps]
+
+    Xs, Ys, Cs, Ps, Ss, CEs = [], [], [], [], [], []
+
+    def _add(win):
+        if win is not None:
+            Xs.append(win[0]); Ys.append(win[1]); Cs.append(win[2])
+            Ps.append(win[3]); Ss.append(win[4]); CEs.append(win[5])
+
+    print(f"Generating {n_candidates} on-policy candidates x {len(snap_at)} snapshots "
+          f"({attack_steps} attack steps, lr={attack_lr})...")
+    for c_i in range(n_candidates):
+        cipher_idx, plain_idx, positions, _target = _sample_example(
+            config, corpus, char_to_idx, n_rotors, seq_len, device)
+        cipher_t = torch.tensor(cipher_idx, dtype=torch.long, device=device).unsqueeze(0)
+        learner = make_random_qnet(config, device)
+        opt = torch.optim.Adam(learner.parameters(), lr=attack_lr)
+        for step in range(attack_steps + 1):
+            learner.reset(positions)
+            logits = learner.encrypt_sequence(cipher_idx)
+            if step in snap_at:
+                with torch.no_grad():
+                    sp = learner.step_positions(len(cipher_idx))
+                    _add(_windows(logits.detach(), plain_idx, cipher_idx, sp,
+                                  learner.state_features(), block_size))
+            if step < attack_steps:
+                pos = learner.step_positions(len(cipher_idx)).unsqueeze(0)
+                state = learner.state_features().unsqueeze(0)
+                loss = approx(logits.unsqueeze(0), cipher=cipher_t,
+                              positions=pos, qnet_state=state).mean()
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+        if (c_i + 1) % 25 == 0:
+            print(f"  candidate {c_i + 1}/{n_candidates}")
+
+    if was_training:
+        approx.denoiser.train()
+
+    X = torch.cat(Xs, dim=0)
+    Y = torch.cat(Ys, dim=0)
+    C = torch.cat(Cs, dim=0)
+    P = torch.cat(Ps, dim=0)
+    S = torch.cat(Ss, dim=0)
+    CE = torch.cat(CEs, dim=0)
+    print(f"On-policy batch: {len(X)} windows  true CE range {CE.min():.2f}..{CE.max():.2f}")
     return X, Y, C, P, S, CE

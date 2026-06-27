@@ -10,10 +10,11 @@ from transformer.model import CharTransformer
 
 @dataclass
 class DenoiserFeatures:
-    use_cipher: bool = True
+    use_cipher: bool = False
     use_positions: bool = True
     use_state: bool = True
     use_lm_prior: bool = False
+    pos_dropout: float = 0.3
     num_rotors: int = 3
     n: int = 26
 
@@ -35,6 +36,7 @@ class PlaintextDenoiser(nn.Module):
             )
             for emb in self.rotor_pos_emb:
                 nn.init.zeros_(emb.weight)
+            self.pos_drop = nn.Dropout(self.feats.pos_dropout)
         if self.feats.use_lm_prior:
             self.prior_proj = nn.Linear(self.feats.n, d_model)
             nn.init.zeros_(self.prior_proj.weight)
@@ -58,8 +60,8 @@ class PlaintextDenoiser(nn.Module):
         if self.feats.use_cipher and cipher is not None:
             h = h + self.cipher_emb(cipher)
         if self.feats.use_positions and positions is not None:
-            for r, emb in enumerate(self.rotor_pos_emb):
-                h = h + emb(positions[..., r])
+            pos_h = sum(emb(positions[..., r]) for r, emb in enumerate(self.rotor_pos_emb))
+            h = h + self.pos_drop(pos_h)
         if self.feats.use_lm_prior and prior is not None:
             h = h + self.prior_proj(prior)
         if self.feats.use_state and qnet_state is not None:
@@ -142,6 +144,11 @@ class CEApproximator(LossFunction):
         d = torch.softmax(logits / self.tau, dim=-1)
         with torch.no_grad():
             return self._denoise(d, cipher, positions, qnet_state)
+
+    def loss_with_target(self, logits, q):
+        d = torch.softmax(logits / self.tau, dim=-1)
+        log_d = torch.log(d.clamp_min(self.eps))
+        return -(q * log_d).sum(-1).mean(-1)
 
     def forward(self, logits, targets=None, cipher=None, positions=None, qnet_state=None):
         d = torch.softmax(logits / self.tau, dim=-1)
